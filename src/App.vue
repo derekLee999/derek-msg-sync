@@ -8,6 +8,7 @@ import SetupPanel from './components/SetupPanel.vue'
 import StatusBar from './components/StatusBar.vue'
 import { useMessages } from './composables/useMessages'
 import { useToast } from './composables/useToast'
+import type { NotificationPosition } from './types'
 
 const {
   messages,
@@ -25,6 +26,7 @@ const {
   refresh,
   restartReceiverWithPort,
   setNotificationEnabled,
+  setNotificationPosition,
   setSenderDevices,
   toggleReceiver,
 } = useMessages()
@@ -143,6 +145,15 @@ async function handleNotificationChange(enabled: boolean) {
   }
 }
 
+async function handleNotificationPositionChange(position: NotificationPosition) {
+  try {
+    await setNotificationPosition(position)
+    showToast('通知位置已更新')
+  } catch {
+    showToast('通知位置保存失败')
+  }
+}
+
 async function handleSenderDevicesChange(devices: typeof senderDevices.value) {
   try {
     await setSenderDevices(devices)
@@ -227,9 +238,11 @@ async function handleSenderDevicesChange(devices: typeof senderDevices.value) {
             :endpoint="endpoint"
             :sender-devices="senderDevices"
             :notification-enabled="status?.notificationEnabled ?? true"
+            :notification-position="status?.notificationPosition ?? 'bottomRight'"
             :port="status?.port ?? 17866"
             @update-sender-devices="handleSenderDevicesChange"
             @set-notification-enabled="handleNotificationChange"
+            @set-notification-position="handleNotificationPositionChange"
             @show-toast="showToast"
             @request-port-change="requestPortChange"
           />

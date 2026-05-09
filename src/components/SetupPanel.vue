@@ -3,26 +3,37 @@ import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart'
 import { computed, onMounted, shallowRef, watch } from 'vue'
-import type { SenderDevice } from '../types'
+import type { NotificationPosition, SenderDevice } from '../types'
 
 const MAX_SENDER_DEVICES = 5
 const SHORTCUT_EXAMPLE_URL = 'https://www.icloud.com/shortcuts/d02d0af4323b403d8c4269019bb6f11f'
+const NOTIFICATION_POSITION_OPTIONS: Array<{ label: string; value: NotificationPosition }> = [
+  { label: '右下', value: 'bottomRight' },
+  { label: '左下', value: 'bottomLeft' },
+  { label: '右上', value: 'topRight' },
+  { label: '左上', value: 'topLeft' },
+  { label: '中上', value: 'topCenter' },
+]
 
 const props = defineProps<{
   endpoint: string
   senderDevices: SenderDevice[]
   notificationEnabled: boolean
+  notificationPosition: NotificationPosition
   port: number
 }>()
 
 const emit = defineEmits<{
   setNotificationEnabled: [enabled: boolean]
+  setNotificationPosition: [position: NotificationPosition]
   showToast: [text: string]
   updateSenderDevices: [devices: SenderDevice[]]
   requestPortChange: [port: number]
 }>()
 
-const copied = shallowRef('')
+type CopiedTarget = '' | 'endpoint' | 'json' | 'curl'
+
+const copied = shallowRef<CopiedTarget>('')
 const autostartEnabled = shallowRef(false)
 const autostartBusy = shallowRef(false)
 const portInput = shallowRef(String(props.port))
@@ -44,7 +55,16 @@ const senderDeviceHint = computed(() => {
   return '设备 ID 由系统生成且不可修改，快捷指令只需发送对应 ID'
 })
 
-const exampleJson = computed(() => {
+const copiedTip = computed(() => {
+  const messages: Record<Exclude<CopiedTarget, ''>, string> = {
+    endpoint: '接收地址已复制',
+    json: 'JSON 示例已复制',
+    curl: 'curl 请求已复制',
+  }
+
+  return copied.value ? messages[copied.value] : ''
+})
+const examplePayload = computed(() => {
   const payload: Record<string, string> = {
     text: '您的验证码是 123456，5 分钟内有效',
   }
@@ -55,7 +75,14 @@ const exampleJson = computed(() => {
     payload.id = '自动生成'
   }
 
-  return JSON.stringify(payload, null, 2)
+  return payload
+})
+const exampleJson = computed(() => JSON.stringify(examplePayload.value, null, 2))
+const curlCommand = computed(() => {
+  const endpoint = escapePowerShellSingleQuoted(props.endpoint)
+  const payload = escapePowerShellSingleQuoted(JSON.stringify(examplePayload.value))
+
+  return `curl.exe -X POST '${endpoint}' -H 'Content-Type: application/json' -d '${payload}'`
 })
 
 watch(
@@ -73,6 +100,15 @@ async function copyEndpoint() {
 async function copyJson() {
   await writeText(exampleJson.value)
   copied.value = 'json'
+}
+
+async function copyCurl() {
+  await writeText(curlCommand.value)
+  copied.value = 'curl'
+}
+
+function escapePowerShellSingleQuoted(value: string) {
+  return value.replace(/'/g, "''")
 }
 
 async function openShortcutExample() {
@@ -189,7 +225,7 @@ onMounted(() => {
       <div class="setting-row">
         <div>
           <span>接收通知</span>
-          <small>收到 iPhone 消息后在右下角显示通知</small>
+          <small>收到 iPhone 消息后显示浮动通知</small>
         </div>
         <button
           type="button"
@@ -200,6 +236,20 @@ onMounted(() => {
         >
           <span></span>
         </button>
+      </div>
+      <div v-if="notificationEnabled" class="notification-position-row">
+        <span>通知位置</span>
+        <div class="segmented-control" role="group" aria-label="通知显示位置">
+          <button
+            v-for="option in NOTIFICATION_POSITION_OPTIONS"
+            :key="option.value"
+            type="button"
+            :class="{ active: notificationPosition === option.value }"
+            @click="emit('setNotificationPosition', option.value)"
+          >
+            {{ option.label }}
+          </button>
+        </div>
       </div>
     </section>
 
@@ -326,12 +376,20 @@ onMounted(() => {
     <section class="settings-section">
       <div class="shortcut-title">
         <span>POST JSON 示例</span>
-        <button type="button" class="icon-button quiet" title="复制 JSON 示例" @click="copyJson">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M8 8h10v10H8z" />
-            <path d="M6 14H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v1" />
-          </svg>
-        </button>
+        <div class="shortcut-actions">
+          <button type="button" class="icon-button quiet" title="复制 JSON 示例" @click="copyJson">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M8 8h10v10H8z" />
+              <path d="M6 14H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v1" />
+            </svg>
+          </button>
+          <button type="button" class="icon-button quiet" title="复制 curl 请求" @click="copyCurl">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m4 7 5 5-5 5" />
+              <path d="M12 17h8" />
+            </svg>
+          </button>
+        </div>
       </div>
       <pre>{{ exampleJson }}</pre>
     </section>
@@ -351,7 +409,7 @@ onMounted(() => {
       </div>
     </section>
 
-    <p v-if="copied" class="copied-tip">{{ copied === 'endpoint' ? '接收地址已复制' : 'JSON 示例已复制' }}</p>
+    <p v-if="copiedTip" class="copied-tip">{{ copiedTip }}</p>
   </aside>
 </template>
 
@@ -565,6 +623,51 @@ h3 {
   font-size: 12px;
 }
 
+.notification-position-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 2px;
+}
+
+.notification-position-row > span {
+  flex: 0 0 auto;
+  color: #465160;
+  font-size: 13px;
+}
+
+.segmented-control {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(38px, 1fr));
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid #d7dde7;
+  border-radius: 7px;
+  background: #ffffff;
+}
+
+.segmented-control button {
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 5px;
+  color: #465160;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.segmented-control button:hover {
+  color: #1769e0;
+  background: #edf4ff;
+}
+
+.segmented-control button.active {
+  color: #ffffff;
+  background: #1769e0;
+}
+
 .switch-button {
   width: 46px;
   height: 26px;
@@ -756,6 +859,12 @@ button:disabled {
   color: #17202f;
   font-size: 13px;
   font-weight: 700;
+}
+
+.shortcut-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 pre {

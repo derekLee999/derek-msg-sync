@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { computed, onMounted, onUnmounted, shallowRef } from 'vue'
-import type { IncomingMessage, ReceiverStatus, SenderDevice } from '../types'
+import type { IncomingMessage, NotificationPosition, ReceiverStatus, SenderDevice } from '../types'
 
 const MAX_VISIBLE_MESSAGES = 100
 
@@ -103,6 +103,17 @@ export function useMessages() {
     }
   }
 
+  async function setNotificationPosition(position: NotificationPosition) {
+    error.value = ''
+    try {
+      await invoke('set_notification_position', { position })
+      await refreshStatus()
+    } catch (cause) {
+      error.value = String(cause)
+      throw cause
+    }
+  }
+
   async function refreshStatus() {
     status.value = await invoke<ReceiverStatus>('receiver_status')
     senderDevices.value = cloneSenderDevices(status.value.senderDevices)
@@ -176,6 +187,7 @@ export function useMessages() {
     refresh,
     restartReceiverWithPort,
     setNotificationEnabled,
+    setNotificationPosition,
     setSenderDevices,
     toggleReceiver,
   }

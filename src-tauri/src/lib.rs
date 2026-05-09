@@ -33,6 +33,16 @@ const NOTIFICATION_WIDTH: f64 = 380.0;
 const NOTIFICATION_HEIGHT: f64 = 116.0;
 const NOTIFICATION_MARGIN: i32 = 18;
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum NotificationPosition {
+    BottomRight,
+    BottomLeft,
+    TopRight,
+    TopLeft,
+    TopCenter,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct IncomingMessage {
@@ -74,6 +84,7 @@ struct ReceiverStatus {
     message_count: usize,
     receiver_running: bool,
     notification_enabled: bool,
+    notification_position: NotificationPosition,
     sender_devices: Vec<SenderDevice>,
 }
 
@@ -83,6 +94,8 @@ struct AppSettings {
     port: u16,
     #[serde(default = "default_notification_enabled")]
     notification_enabled: bool,
+    #[serde(default = "default_notification_position")]
+    notification_position: NotificationPosition,
     #[serde(default)]
     sender_devices: Vec<SenderDevice>,
 }
@@ -93,6 +106,7 @@ struct AppState {
     settings_path: PathBuf,
     port: Mutex<u16>,
     notification_enabled: Mutex<bool>,
+    notification_position: Mutex<NotificationPosition>,
     sender_devices: Mutex<Vec<SenderDevice>>,
     receiver: Mutex<Option<Arc<Server>>>,
 }
@@ -137,6 +151,7 @@ fn receiver_status(state: State<'_, Arc<AppState>>) -> ReceiverStatus {
         message_count: state.messages.lock().expect("message state poisoned").len(),
         receiver_running: receiver_is_running(&state),
         notification_enabled: notifications_are_enabled(&state),
+        notification_position: current_notification_position(&state),
         sender_devices: current_sender_devices(&state),
     }
 }
@@ -148,6 +163,19 @@ fn set_notification_enabled(enabled: bool, state: State<'_, Arc<AppState>>) -> R
         .notification_enabled
         .lock()
         .map_err(|_| "通知设置不可用".to_string())? = enabled;
+    persist_settings(&state)
+}
+
+#[tauri::command]
+fn set_notification_position(
+    position: NotificationPosition,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    let state = state.inner().clone();
+    *state
+        .notification_position
+        .lock()
+        .map_err(|_| "通知位置设置不可用".to_string())? = position;
     persist_settings(&state)
 }
 
@@ -276,6 +304,14 @@ fn notifications_are_enabled(state: &Arc<AppState>) -> bool {
         .lock()
         .map(|enabled| *enabled)
         .unwrap_or(true)
+}
+
+fn current_notification_position(state: &Arc<AppState>) -> NotificationPosition {
+    state
+        .notification_position
+        .lock()
+        .map(|position| *position)
+        .unwrap_or_else(|_| default_notification_position())
 }
 
 fn current_sender_devices(state: &Arc<AppState>) -> Vec<SenderDevice> {
@@ -487,13 +523,17 @@ fn handle_request(mut request: tiny_http::Request, app: &AppHandle, state: &Arc<
         let _ = app.emit("receiver-error", format!("保存本地消息失败: {}", error));
     }
     if notifications_are_enabled(state) {
-        show_message_notification(app, &message);
+        show_message_notification(app, &message, current_notification_position(state));
     }
     let _ = app.emit("message-received", message);
     respond(request, StatusCode(200), r#"{"ok":true}"#);
 }
 
-fn show_message_notification(app: &AppHandle, message: &IncomingMessage) {
+fn show_message_notification(
+    app: &AppHandle,
+    message: &IncomingMessage,
+    position: NotificationPosition,
+) {
     let app_for_thread = app.clone();
     let app = app.clone();
     let message = message.clone();
@@ -507,7 +547,7 @@ fn show_message_notification(app: &AppHandle, message: &IncomingMessage) {
             }
         };
 
-        let _ = position_notification_window(&window);
+        let _ = position_notification_window(&window, position);
         let _ = window.set_always_on_top(true);
         let _ = window.show();
         let _ = app.emit_to(
@@ -540,7 +580,10 @@ fn ensure_notification_window(app: &AppHandle) -> tauri::Result<tauri::WebviewWi
     .build()
 }
 
-fn position_notification_window(window: &tauri::WebviewWindow) -> tauri::Result<()> {
+fn position_notification_window(
+    window: &tauri::WebviewWindow,
+    position: NotificationPosition,
+) -> tauri::Result<()> {
     let monitor = window
         .current_monitor()?
         .or(window.primary_monitor()?)
@@ -556,12 +599,31 @@ fn position_notification_window(window: &tauri::WebviewWindow) -> tauri::Result<
         let scale_factor = monitor.scale_factor();
         let physical_width = (NOTIFICATION_WIDTH * scale_factor).round() as i32;
         let physical_height = (NOTIFICATION_HEIGHT * scale_factor).round() as i32;
-        let x = work_area.position.x + work_area.size.width as i32
-            - physical_width
-            - NOTIFICATION_MARGIN;
-        let y = work_area.position.y + work_area.size.height as i32
-            - physical_height
-            - NOTIFICATION_MARGIN;
+        let x = match position {
+            NotificationPosition::BottomRight | NotificationPosition::TopRight => {
+                work_area.position.x + work_area.size.width as i32
+                    - physical_width
+                    - NOTIFICATION_MARGIN
+            }
+            NotificationPosition::BottomLeft | NotificationPosition::TopLeft => {
+                work_area.position.x + NOTIFICATION_MARGIN
+            }
+            NotificationPosition::TopCenter => {
+                work_area.position.x + ((work_area.size.width as i32 - physical_width) / 2)
+            }
+        };
+        let y = match position {
+            NotificationPosition::BottomRight | NotificationPosition::BottomLeft => {
+                work_area.position.y + work_area.size.height as i32
+                    - physical_height
+                    - NOTIFICATION_MARGIN
+            }
+            NotificationPosition::TopRight
+            | NotificationPosition::TopLeft
+            | NotificationPosition::TopCenter => {
+                work_area.position.y + NOTIFICATION_MARGIN
+            }
+        };
         window.set_position(PhysicalPosition::new(x, y))?;
     }
 
@@ -585,6 +647,7 @@ fn load_settings(path: PathBuf) -> AppSettings {
         .unwrap_or(AppSettings {
             port: DEFAULT_SERVER_PORT,
             notification_enabled: default_notification_enabled(),
+            notification_position: default_notification_position(),
             sender_devices: vec![default_sender_device()],
         })
 }
@@ -593,6 +656,7 @@ fn persist_settings(state: &Arc<AppState>) -> Result<(), String> {
     let settings = AppSettings {
         port: current_port(state),
         notification_enabled: notifications_are_enabled(state),
+        notification_position: current_notification_position(state),
         sender_devices: current_sender_devices(state),
     };
 
@@ -606,6 +670,10 @@ fn persist_settings(state: &Arc<AppState>) -> Result<(), String> {
 
 fn default_notification_enabled() -> bool {
     true
+}
+
+fn default_notification_position() -> NotificationPosition {
+    NotificationPosition::BottomRight
 }
 
 fn default_sender() -> String {
@@ -750,6 +818,7 @@ pub fn run() {
                 settings_path,
                 port: Mutex::new(settings.port),
                 notification_enabled: Mutex::new(settings.notification_enabled),
+                notification_position: Mutex::new(settings.notification_position),
                 sender_devices: Mutex::new(sender_devices),
                 receiver: Mutex::new(None),
             });
@@ -781,6 +850,7 @@ pub fn run() {
             clear_messages,
             receiver_status,
             set_notification_enabled,
+            set_notification_position,
             set_sender_devices,
             set_receiver_port,
             start_receiver_command,

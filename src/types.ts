@@ -15,8 +15,11 @@ export interface ReceiverStatus {
   messageCount: number
   receiverRunning: boolean
   notificationEnabled: boolean
+  notificationPosition: NotificationPosition
   senderDevices: SenderDevice[]
 }
+
+export type NotificationPosition = 'bottomRight' | 'bottomLeft' | 'topRight' | 'topLeft' | 'topCenter'
 
 export interface SenderDevice {
   id: string
