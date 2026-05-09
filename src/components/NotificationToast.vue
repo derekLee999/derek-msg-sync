@@ -4,10 +4,13 @@ import { listen } from '@tauri-apps/api/event'
 import { onMounted, onUnmounted, shallowRef } from 'vue'
 import type { IncomingMessage } from '../types'
 
+const NOTIFICATION_SOUND = '/notification-pluck-off-269290.mp3'
+
 const visible = shallowRef(false)
 const message = shallowRef<IncomingMessage | null>(null)
 let hideTimer: number | null = null
 let unlistenMessage: (() => void) | null = null
+let notificationAudio: HTMLAudioElement | null = null
 const appWindow = getCurrentWindow()
 
 function clearHideTimer() {
@@ -36,7 +39,20 @@ async function hideToast() {
 function showToast(nextMessage: IncomingMessage) {
   message.value = nextMessage
   visible.value = true
+  playNotificationSound()
   scheduleHide(3000)
+}
+
+function playNotificationSound() {
+  if (!notificationAudio) {
+    notificationAudio = new Audio(NOTIFICATION_SOUND)
+    notificationAudio.preload = 'auto'
+  }
+
+  notificationAudio.currentTime = 0
+  notificationAudio.play().catch(() => {
+    // WebView audio policy may block playback in rare cases; keep the toast visible.
+  })
 }
 
 function handleMouseEnter() {
