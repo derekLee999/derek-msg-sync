@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
+import { openUrl } from '@tauri-apps/plugin-opener'
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart'
 import { computed, onMounted, shallowRef, watch } from 'vue'
 import type { SenderDevice } from '../types'
 
 const MAX_SENDER_DEVICES = 5
+const SHORTCUT_EXAMPLE_URL = 'https://www.icloud.com/shortcuts/d02d0af4323b403d8c4269019bb6f11f'
 
 const props = defineProps<{
   endpoint: string
@@ -71,6 +73,14 @@ async function copyEndpoint() {
 async function copyJson() {
   await writeText(exampleJson.value)
   copied.value = 'json'
+}
+
+async function openShortcutExample() {
+  try {
+    await openUrl(SHORTCUT_EXAMPLE_URL)
+  } catch {
+    emit('showToast', '快捷指令链接打开失败')
+  }
 }
 
 async function copyDeviceId(deviceId: string) {
@@ -198,6 +208,26 @@ onMounted(() => {
         <div>
           <p class="eyebrow">iPhone 快捷指令</p>
           <h2>局域网接入</h2>
+        </div>
+        <button type="button" class="small-button" @click="openShortcutExample">快捷指令示例</button>
+      </div>
+
+      <div class="shortcut-notice">
+        <div>
+          <b>快捷指令需要修改</b>
+          <span>请在iPhone快捷指令中把接收地址改为本机 IP，并把 JSON 里的 id 改为当前设备 ID。</span>
+        </div>
+        <div class="preview-tip">
+          <button type="button" class="preview-trigger" aria-label="查看快捷指令截图">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 17v-6" />
+              <path d="M12 8h.01" />
+              <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z" />
+            </svg>
+          </button>
+          <div class="preview-popover" role="tooltip">
+            <img src="/auto-example.jpg" alt="快捷指令自动化示例截图" />
+          </div>
         </div>
       </div>
 
@@ -414,6 +444,94 @@ h3 {
 
 .field-hint.error {
   color: #b42318;
+}
+
+.shortcut-notice {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  align-items: start;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid #f7d68a;
+  border-radius: 7px;
+  color: #7a4f01;
+  background: #fff8e6;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.shortcut-notice b {
+  display: block;
+  color: #5f3b00;
+  font-size: 13px;
+}
+
+.preview-tip {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.preview-trigger {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  color: #7a4f01;
+  background: #ffefbd;
+}
+
+.preview-trigger:hover,
+.preview-trigger:focus-visible {
+  color: #5f3b00;
+  background: #ffe39a;
+}
+
+.preview-trigger svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.preview-popover {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 30;
+  width: min(420px, calc(100vw - 72px));
+  max-height: min(620px, calc(100vh - 96px));
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid rgba(28, 39, 54, 0.14);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 24px 70px rgba(28, 39, 54, 0.3);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -48%);
+  transition:
+    opacity 0.14s ease,
+    transform 0.14s ease;
+}
+
+.preview-popover img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 5px;
+}
+
+.preview-tip:hover .preview-popover,
+.preview-tip:focus-within .preview-popover {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, -50%);
 }
 
 .section-actions {
