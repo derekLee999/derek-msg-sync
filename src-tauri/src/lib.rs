@@ -391,7 +391,7 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
 
     TrayIconBuilder::new()
         .icon(icon)
-        .tooltip("Derek Msg Sync")
+        .tooltip("验证码接收器")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| {
