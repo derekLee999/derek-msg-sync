@@ -13,15 +13,13 @@ export interface ReceiverStatus {
   localIp: string | null
   endpoint: string
   messageCount: number
-  tokenRequired: boolean
   receiverRunning: boolean
   notificationEnabled: boolean
-  defaultSender: string
   senderDevices: SenderDevice[]
 }
 
 export interface SenderDevice {
   id: string
   name: string
-  token: string
+  deviceId: string
 }

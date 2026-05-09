@@ -22,8 +22,10 @@ use tiny_http::{Header, Method, Response, Server, StatusCode};
 use uuid::Uuid;
 
 const DEFAULT_SERVER_PORT: u16 = 17866;
-const DEFAULT_SENDER: &str = "iPhone";
+const DEFAULT_DEVICE_ID: &str = "default-iphone";
+const DEFAULT_DEVICE_NAME: &str = "iPhone";
 const MIN_SERVER_PORT: u16 = 1024;
+const MAX_SENDER_DEVICES: usize = 5;
 const MAX_MESSAGES: usize = 100;
 const TRAY_EXIT_ID: &str = "quit";
 const NOTIFICATION_LABEL: &str = "message-toast";
@@ -50,7 +52,8 @@ struct IncomingPayload {
     text: Option<String>,
     message: Option<String>,
     code: Option<String>,
-    token: Option<String>,
+    #[serde(rename = "id")]
+    device_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,7 +61,8 @@ struct IncomingPayload {
 struct SenderDevice {
     id: String,
     name: String,
-    token: String,
+    #[serde(default, rename = "deviceId")]
+    device_id: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -68,10 +72,8 @@ struct ReceiverStatus {
     local_ip: Option<String>,
     endpoint: String,
     message_count: usize,
-    token_required: bool,
     receiver_running: bool,
     notification_enabled: bool,
-    default_sender: String,
     sender_devices: Vec<SenderDevice>,
 }
 
@@ -81,20 +83,16 @@ struct AppSettings {
     port: u16,
     #[serde(default = "default_notification_enabled")]
     notification_enabled: bool,
-    #[serde(default = "default_sender")]
-    default_sender: String,
     #[serde(default)]
     sender_devices: Vec<SenderDevice>,
 }
 
 struct AppState {
     messages: Mutex<VecDeque<IncomingMessage>>,
-    token: Mutex<Option<String>>,
     storage_path: PathBuf,
     settings_path: PathBuf,
     port: Mutex<u16>,
     notification_enabled: Mutex<bool>,
-    default_sender: Mutex<String>,
     sender_devices: Mutex<Vec<SenderDevice>>,
     receiver: Mutex<Option<Arc<Server>>>,
 }
@@ -127,8 +125,6 @@ fn clear_messages(state: State<'_, Arc<AppState>>, app: AppHandle) {
 fn receiver_status(state: State<'_, Arc<AppState>>) -> ReceiverStatus {
     let local_ip = local_ipv4();
     let port = current_port(&state);
-    let token_required = state.token.lock().expect("token state poisoned").is_some()
-        || !current_sender_devices(&state).is_empty();
     let endpoint = match &local_ip {
         Some(ip) => format!("http://{}:{}/otp", ip, port),
         None => format!("http://<Windows局域网IP>:{}/otp", port),
@@ -139,22 +135,10 @@ fn receiver_status(state: State<'_, Arc<AppState>>) -> ReceiverStatus {
         local_ip,
         endpoint,
         message_count: state.messages.lock().expect("message state poisoned").len(),
-        token_required,
         receiver_running: receiver_is_running(&state),
         notification_enabled: notifications_are_enabled(&state),
-        default_sender: current_default_sender(&state),
         sender_devices: current_sender_devices(&state),
     }
-}
-
-#[tauri::command]
-fn set_receiver_token(token: String, state: State<'_, Arc<AppState>>) {
-    let normalized = token.trim().to_string();
-    *state.token.lock().expect("token state poisoned") = if normalized.is_empty() {
-        None
-    } else {
-        Some(normalized)
-    };
 }
 
 #[tauri::command]
@@ -168,20 +152,14 @@ fn set_notification_enabled(enabled: bool, state: State<'_, Arc<AppState>>) -> R
 }
 
 #[tauri::command]
-fn set_default_sender(sender: String, state: State<'_, Arc<AppState>>) -> Result<(), String> {
-    let state = state.inner().clone();
-    *state
-        .default_sender
-        .lock()
-        .map_err(|_| "发送方设置不可用".to_string())? = normalize_default_sender(&sender);
-    persist_settings(&state)
-}
-
-#[tauri::command]
 fn set_sender_devices(
     devices: Vec<SenderDevice>,
     state: State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
+    if devices.len() > MAX_SENDER_DEVICES {
+        return Err(format!("最多只能添加 {} 个设备", MAX_SENDER_DEVICES));
+    }
+
     let state = state.inner().clone();
     *state
         .sender_devices
@@ -300,14 +278,6 @@ fn notifications_are_enabled(state: &Arc<AppState>) -> bool {
         .unwrap_or(true)
 }
 
-fn current_default_sender(state: &Arc<AppState>) -> String {
-    state
-        .default_sender
-        .lock()
-        .map(|sender| normalize_default_sender(&sender))
-        .unwrap_or_else(|_| default_sender())
-}
-
 fn current_sender_devices(state: &Arc<AppState>) -> Vec<SenderDevice> {
     state
         .sender_devices
@@ -316,35 +286,58 @@ fn current_sender_devices(state: &Arc<AppState>) -> Vec<SenderDevice> {
         .unwrap_or_default()
 }
 
-fn normalize_default_sender(sender: &str) -> String {
-    let sender = sender.trim();
-    if sender.is_empty() {
-        default_sender()
-    } else {
-        sender.to_string()
-    }
-}
-
 fn normalize_sender_devices(devices: Vec<SenderDevice>) -> Vec<SenderDevice> {
-    let mut seen_tokens = HashSet::new();
-    devices
+    let mut seen_device_ids = HashSet::new();
+    let normalized: Vec<SenderDevice> = devices
         .into_iter()
         .filter_map(|device| {
-            let token = device.token.trim().to_string();
-            if token.is_empty() || !seen_tokens.insert(token.clone()) {
-                return None;
-            }
+            let device_id = unique_device_id(&device.device_id, &mut seen_device_ids);
 
             let id = if device.id.trim().is_empty() {
                 Uuid::new_v4().to_string()
             } else {
                 device.id.trim().to_string()
             };
-            let name = normalize_default_sender(&device.name);
+            let name = normalize_device_name(&device.name);
 
-            Some(SenderDevice { id, name, token })
+            Some(SenderDevice {
+                id,
+                name,
+                device_id,
+            })
         })
-        .collect()
+        .collect();
+
+    if normalized.is_empty() {
+        vec![default_sender_device()]
+    } else {
+        normalized
+    }
+}
+
+fn unique_device_id(preferred: &str, seen_device_ids: &mut HashSet<String>) -> String {
+    let preferred = preferred.trim();
+    if is_valid_device_id(preferred) && seen_device_ids.insert(preferred.to_string()) {
+        return preferred.to_string();
+    }
+
+    loop {
+        let device_id = generate_device_id();
+        if seen_device_ids.insert(device_id.clone()) {
+            return device_id;
+        }
+    }
+}
+
+fn is_valid_device_id(device_id: &str) -> bool {
+    device_id.len() == 7
+        && device_id
+            .chars()
+            .all(|character| character.is_ascii_digit())
+}
+
+fn generate_device_id() -> String {
+    (1_000_000 + (Uuid::new_v4().as_u128() % 9_000_000)).to_string()
 }
 
 fn receiver_is_running(state: &Arc<AppState>) -> bool {
@@ -437,12 +430,8 @@ fn handle_request(mut request: tiny_http::Request, app: &AppHandle, state: &Arc<
         }
     };
 
-    if !token_is_valid(&payload, state) {
-        respond(
-            request,
-            StatusCode(401),
-            r#"{"ok":false,"error":"bad_token"}"#,
-        );
+    if !device_id_is_valid(&payload, state) {
+        respond(request, StatusCode(401), r#"{"ok":false,"error":"bad_id"}"#);
         return;
     }
 
@@ -475,10 +464,10 @@ fn handle_request(mut request: tiny_http::Request, app: &AppHandle, state: &Arc<
         .or_else(|| extract_code(&text));
     let copied_text = code.clone().unwrap_or_else(|| text.clone());
 
-    let token_for_sender = payload.token.clone();
+    let id_for_sender = payload.device_id.clone();
     let message = IncomingMessage {
         id: Uuid::new_v4().to_string(),
-        sender: resolve_sender(payload.sender, token_for_sender.as_deref(), state),
+        sender: resolve_sender(payload.sender, id_for_sender.as_deref(), state),
         text,
         code,
         copied_text,
@@ -596,8 +585,7 @@ fn load_settings(path: PathBuf) -> AppSettings {
         .unwrap_or(AppSettings {
             port: DEFAULT_SERVER_PORT,
             notification_enabled: default_notification_enabled(),
-            default_sender: default_sender(),
-            sender_devices: Vec::new(),
+            sender_devices: vec![default_sender_device()],
         })
 }
 
@@ -605,7 +593,6 @@ fn persist_settings(state: &Arc<AppState>) -> Result<(), String> {
     let settings = AppSettings {
         port: current_port(state),
         notification_enabled: notifications_are_enabled(state),
-        default_sender: current_default_sender(state),
         sender_devices: current_sender_devices(state),
     };
 
@@ -622,35 +609,52 @@ fn default_notification_enabled() -> bool {
 }
 
 fn default_sender() -> String {
-    DEFAULT_SENDER.to_string()
+    DEFAULT_DEVICE_NAME.to_string()
+}
+
+fn default_sender_device() -> SenderDevice {
+    SenderDevice {
+        id: DEFAULT_DEVICE_ID.to_string(),
+        name: DEFAULT_DEVICE_NAME.to_string(),
+        device_id: generate_device_id(),
+    }
+}
+
+fn normalize_device_name(name: &str) -> String {
+    let name = name.trim();
+    if name.is_empty() {
+        default_sender()
+    } else {
+        name.to_string()
+    }
 }
 
 fn resolve_sender(
     request_sender: Option<String>,
-    request_token: Option<&str>,
+    request_device_id: Option<&str>,
     state: &Arc<AppState>,
 ) -> String {
-    request_token
-        .and_then(|token| sender_for_device_token(token, state))
-        .unwrap_or_else(|| normalize_request_sender(request_sender, state))
+    request_device_id
+        .and_then(|device_id| sender_for_device_id(device_id, state))
+        .unwrap_or_else(|| normalize_request_sender(request_sender))
 }
 
-fn normalize_request_sender(sender: Option<String>, state: &Arc<AppState>) -> String {
+fn normalize_request_sender(sender: Option<String>) -> String {
     sender
         .map(|sender| sender.trim().to_string())
         .filter(|sender| !sender.is_empty())
-        .unwrap_or_else(|| current_default_sender(state))
+        .unwrap_or_else(default_sender)
 }
 
-fn sender_for_device_token(token: &str, state: &Arc<AppState>) -> Option<String> {
-    let token = token.trim();
-    if token.is_empty() {
+fn sender_for_device_id(device_id: &str, state: &Arc<AppState>) -> Option<String> {
+    let device_id = device_id.trim();
+    if device_id.is_empty() {
         return None;
     }
 
     current_sender_devices(state)
         .into_iter()
-        .find(|device| device.token == token)
+        .find(|device| device.device_id == device_id)
         .map(|device| device.name)
 }
 
@@ -686,24 +690,12 @@ fn respond(request: tiny_http::Request, status: StatusCode, body: &str) {
     let _ = request.respond(response);
 }
 
-fn token_is_valid(payload: &IncomingPayload, state: &Arc<AppState>) -> bool {
-    let provided_token = payload
-        .token
+fn device_id_is_valid(payload: &IncomingPayload, state: &Arc<AppState>) -> bool {
+    payload
+        .device_id
         .as_deref()
-        .map(str::trim)
-        .filter(|token| !token.is_empty());
-    if provided_token
-        .and_then(|token| sender_for_device_token(token, state))
+        .and_then(|device_id| sender_for_device_id(device_id, state))
         .is_some()
-    {
-        return true;
-    }
-
-    let expected = state.token.lock().expect("token state poisoned").clone();
-    match expected {
-        Some(expected) => provided_token.is_some_and(|token| token == expected),
-        None => current_sender_devices(state).is_empty(),
-    }
 }
 
 fn normalize_code(value: &str) -> Option<String> {
@@ -751,19 +743,21 @@ pub fn run() {
             let storage_path = app_data_dir.join("messages.json");
             let settings_path = app_data_dir.join("settings.json");
             let settings = load_settings(settings_path.clone());
+            let sender_devices = normalize_sender_devices(settings.sender_devices);
             let state = Arc::new(AppState {
                 messages: Mutex::new(load_messages(storage_path.clone())),
-                token: Mutex::new(None),
                 storage_path,
                 settings_path,
                 port: Mutex::new(settings.port),
                 notification_enabled: Mutex::new(settings.notification_enabled),
-                default_sender: Mutex::new(normalize_default_sender(&settings.default_sender)),
-                sender_devices: Mutex::new(normalize_sender_devices(settings.sender_devices)),
+                sender_devices: Mutex::new(sender_devices),
                 receiver: Mutex::new(None),
             });
 
             app.manage(state.clone());
+            if let Err(error) = persist_settings(&state) {
+                let _ = app.emit("receiver-error", format!("保存本地设置失败: {}", error));
+            }
             setup_tray(app.handle())?;
             if let Err(error) = ensure_notification_window(app.handle()) {
                 let _ = app.emit("receiver-error", format!("通知窗口初始化失败: {}", error));
@@ -786,9 +780,7 @@ pub fn run() {
             get_messages,
             clear_messages,
             receiver_status,
-            set_receiver_token,
             set_notification_enabled,
-            set_default_sender,
             set_sender_devices,
             set_receiver_port,
             start_receiver_command,

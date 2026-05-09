@@ -16,14 +16,11 @@ export function useMessages() {
   const loading = shallowRef(true)
   const error = shallowRef('')
   const lastReceived = shallowRef('')
-  const token = shallowRef('')
-  const defaultSender = shallowRef('iPhone')
   const senderDevices = shallowRef<SenderDevice[]>([])
 
   const latestMessage = computed(() => messages.value[0] ?? null)
   const totalCount = computed(() => messages.value.length)
   const endpoint = computed(() => status.value?.endpoint ?? `http://<Windows局域网IP>:${status.value?.port ?? 17866}/otp`)
-  const isTokenEnabled = computed(() => status.value?.tokenRequired ?? false)
 
   async function refresh() {
     loading.value = true
@@ -35,7 +32,6 @@ export function useMessages() {
       ])
       messages.value = nextMessages
       status.value = nextStatus
-      defaultSender.value = nextStatus.defaultSender || 'iPhone'
       senderDevices.value = cloneSenderDevices(nextStatus.senderDevices)
       lastReceived.value = nextMessages[0]?.copiedText ?? ''
     } catch (cause) {
@@ -73,26 +69,11 @@ export function useMessages() {
     await writeText(lastReceived.value)
   }
 
-  async function saveToken() {
-    await invoke('set_receiver_token', { token: token.value })
-    await refreshStatus()
-  }
-
-  async function saveDefaultSender() {
+  async function setSenderDevices(devices: SenderDevice[]) {
     error.value = ''
+    senderDevices.value = cloneSenderDevices(devices)
     try {
-      await invoke('set_default_sender', { sender: defaultSender.value })
-      await refreshStatus()
-    } catch (cause) {
-      error.value = String(cause)
-      throw cause
-    }
-  }
-
-  async function saveSenderDevices() {
-    error.value = ''
-    try {
-      await invoke('set_sender_devices', { devices: senderDevices.value })
+      await invoke('set_sender_devices', { devices })
       await refreshStatus()
     } catch (cause) {
       error.value = String(cause)
@@ -124,7 +105,6 @@ export function useMessages() {
 
   async function refreshStatus() {
     status.value = await invoke<ReceiverStatus>('receiver_status')
-    defaultSender.value = status.value.defaultSender || 'iPhone'
     senderDevices.value = cloneSenderDevices(status.value.senderDevices)
   }
 
@@ -185,27 +165,31 @@ export function useMessages() {
     loading,
     error,
     lastReceived,
-    token,
-    defaultSender,
     senderDevices,
     latestMessage,
     totalCount,
     endpoint,
-    isTokenEnabled,
     clearMessages,
     copyLocalIp,
     copyMessage,
     copyRecent,
     refresh,
     restartReceiverWithPort,
-    saveDefaultSender,
-    saveSenderDevices,
-    saveToken,
     setNotificationEnabled,
+    setSenderDevices,
     toggleReceiver,
   }
 }
 
 function cloneSenderDevices(devices: SenderDevice[] | undefined) {
-  return (devices ?? []).map((device) => ({ ...device }))
+  const nextDevices = (devices ?? []).map((device) => ({ ...device }))
+  return nextDevices.length > 0
+    ? nextDevices
+    : [
+        {
+          id: 'default-iphone',
+          name: 'iPhone',
+          deviceId: '',
+        },
+      ]
 }

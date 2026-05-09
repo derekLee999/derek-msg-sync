@@ -15,22 +15,17 @@ const {
   loading,
   error,
   lastReceived,
-  token,
-  defaultSender,
   senderDevices,
   totalCount,
   endpoint,
-  isTokenEnabled,
   clearMessages,
   copyLocalIp,
   copyMessage,
   copyRecent,
   refresh,
   restartReceiverWithPort,
-  saveDefaultSender,
-  saveSenderDevices,
-  saveToken,
   setNotificationEnabled,
+  setSenderDevices,
   toggleReceiver,
 } = useMessages()
 
@@ -147,6 +142,14 @@ async function handleNotificationChange(enabled: boolean) {
     showToast('通知设置保存失败')
   }
 }
+
+async function handleSenderDevicesChange(devices: typeof senderDevices.value) {
+  try {
+    await setSenderDevices(devices)
+  } catch {
+    showToast('设备更新失败')
+  }
+}
 </script>
 
 <template>
@@ -222,19 +225,12 @@ async function handleNotificationChange(enabled: boolean) {
           <div class="modal-content">
           <SetupPanel
             :endpoint="endpoint"
-            :default-sender="defaultSender"
             :sender-devices="senderDevices"
-            :token="token"
-            :is-token-enabled="isTokenEnabled"
             :notification-enabled="status?.notificationEnabled ?? true"
             :port="status?.port ?? 17866"
-            @save-default-sender="saveDefaultSender"
-            @save-sender-devices="saveSenderDevices"
-            @save-token="saveToken"
-            @update-default-sender="defaultSender = $event"
-            @update-sender-devices="senderDevices = $event"
+            @update-sender-devices="handleSenderDevicesChange"
             @set-notification-enabled="handleNotificationChange"
-            @update-token="token = $event"
+            @show-toast="showToast"
             @request-port-change="requestPortChange"
           />
           </div>

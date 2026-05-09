@@ -4,24 +4,19 @@ import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart'
 import { computed, onMounted, shallowRef, watch } from 'vue'
 import type { SenderDevice } from '../types'
 
+const MAX_SENDER_DEVICES = 5
+
 const props = defineProps<{
   endpoint: string
-  defaultSender: string
   senderDevices: SenderDevice[]
-  token: string
-  isTokenEnabled: boolean
   notificationEnabled: boolean
   port: number
 }>()
 
 const emit = defineEmits<{
-  saveDefaultSender: []
-  saveSenderDevices: []
-  saveToken: []
   setNotificationEnabled: [enabled: boolean]
-  updateDefaultSender: [value: string]
+  showToast: [text: string]
   updateSenderDevices: [devices: SenderDevice[]]
-  updateToken: [value: string]
   requestPortChange: [port: number]
 }>()
 
@@ -36,24 +31,15 @@ const portInvalid = computed(() => {
   return !Number.isInteger(port) || port < 1024 || port > 65535
 })
 const portChanged = computed(() => !portInvalid.value && parsedPort.value !== props.port)
-const firstDevice = computed(() => props.senderDevices.find((device) => device.token.trim()) ?? null)
-const senderDeviceInvalid = computed(() =>
-  props.senderDevices.some((device) => !device.name.trim() || !device.token.trim()) || hasDuplicateDeviceToken.value,
-)
-const hasDuplicateDeviceToken = computed(() => {
-  const tokens = props.senderDevices.map((device) => device.token.trim()).filter(Boolean)
-  return new Set(tokens).size !== tokens.length
-})
+const firstDevice = computed(() => props.senderDevices.find((device) => device.deviceId.trim()) ?? null)
+const canRemoveDevice = computed(() => props.senderDevices.length > 1)
+const senderDeviceInvalid = computed(() => props.senderDevices.some((device) => !device.name.trim()))
 const senderDeviceHint = computed(() => {
-  if (hasDuplicateDeviceToken.value) {
-    return '设备 Token 不能重复'
-  }
-
   if (senderDeviceInvalid.value) {
-    return '请补全设备名称和 Token 后保存'
+    return '请填写设备名称'
   }
 
-  return '快捷指令只需发送对应 Token，即可自动区分多部 iPhone'
+  return '设备 ID 由系统生成且不可修改，快捷指令只需发送对应 ID'
 })
 
 const exampleJson = computed(() => {
@@ -62,12 +48,9 @@ const exampleJson = computed(() => {
   }
 
   if (firstDevice.value) {
-    payload.token = firstDevice.value.token.trim()
+    payload.id = firstDevice.value.deviceId.trim()
   } else {
-    payload.sender = props.defaultSender.trim() || 'iPhone'
-    if (props.token.trim()) {
-      payload.token = props.token.trim()
-    }
+    payload.id = '自动生成'
   }
 
   return JSON.stringify(payload, null, 2)
@@ -88,6 +71,17 @@ async function copyEndpoint() {
 async function copyJson() {
   await writeText(exampleJson.value)
   copied.value = 'json'
+}
+
+async function copyDeviceId(deviceId: string) {
+  const normalizedDeviceId = deviceId.trim()
+  if (!normalizedDeviceId) {
+    emit('showToast', '设备 ID 会自动生成')
+    return
+  }
+
+  await writeText(normalizedDeviceId)
+  emit('showToast', '设备 ID 已复制')
 }
 
 async function refreshAutostart() {
@@ -118,24 +112,29 @@ function submitPortChange() {
 }
 
 function addSenderDevice() {
+  if (props.senderDevices.length >= MAX_SENDER_DEVICES) {
+    emit('showToast', `最多只能添加 ${MAX_SENDER_DEVICES} 个设备`)
+    return
+  }
+
   emit('updateSenderDevices', [
     ...props.senderDevices,
     {
       id: crypto.randomUUID(),
       name: `iPhone ${props.senderDevices.length + 1}`,
-      token: '',
+      deviceId: '',
     },
   ])
 }
 
-function updateSenderDevice(id: string, field: 'name' | 'token', value: string) {
+function updateSenderDevice(id: string, value: string) {
   emit(
     'updateSenderDevices',
     props.senderDevices.map((device) =>
       device.id === id
         ? {
             ...device,
-            [field]: value,
+            name: value,
           }
         : device,
     ),
@@ -143,6 +142,10 @@ function updateSenderDevice(id: string, field: 'name' | 'token', value: string) 
 }
 
 function removeSenderDevice(id: string) {
+  if (!canRemoveDevice.value) {
+    return
+  }
+
   emit(
     'updateSenderDevices',
     props.senderDevices.filter((device) => device.id !== id),
@@ -234,25 +237,19 @@ onMounted(() => {
         <small v-if="portInvalid" class="field-hint error">端口号需在 1024-65535 之间</small>
         <small v-else class="field-hint">修改端口后会重启接收服务并更新接收地址</small>
       </label>
-
-      <label class="field">
-        <span>发送方名称</span>
-        <div class="control-row">
-          <input
-            :value="defaultSender"
-            placeholder="iPhone"
-            @input="emit('updateDefaultSender', ($event.target as HTMLInputElement).value)"
-          />
-          <button type="button" class="text-button" @click="emit('saveDefaultSender')">保存</button>
-        </div>
-        <small class="field-hint">快捷指令未发送 sender 时，消息将使用此名称</small>
-      </label>
     </section>
 
     <section class="settings-section">
       <div class="section-head compact">
         <h3>设备识别</h3>
-        <button type="button" class="small-button" @click="addSenderDevice">添加设备</button>
+        <button
+          type="button"
+          class="small-button"
+          :title="`最多 ${MAX_SENDER_DEVICES} 个设备`"
+          @click="addSenderDevice"
+        >
+          添加设备
+        </button>
       </div>
 
       <div v-if="senderDevices.length" class="device-list">
@@ -262,18 +259,26 @@ onMounted(() => {
             <input
               :value="device.name"
               placeholder="Derek iPhone"
-              @input="updateSenderDevice(device.id, 'name', ($event.target as HTMLInputElement).value)"
+              @input="updateSenderDevice(device.id, ($event.target as HTMLInputElement).value)"
             />
           </label>
           <label>
-            <span>设备 Token</span>
+            <span>设备 ID</span>
             <input
-              :value="device.token"
-              placeholder="每部 iPhone 使用不同 Token"
-              @input="updateSenderDevice(device.id, 'token', ($event.target as HTMLInputElement).value)"
+              class="device-id-input"
+              :value="device.deviceId || '自动生成'"
+              readonly
+              title="点击复制设备 ID"
+              @click="copyDeviceId(device.deviceId)"
             />
           </label>
-          <button type="button" class="danger-button" title="删除设备" @click="removeSenderDevice(device.id)">
+          <button
+            type="button"
+            class="danger-button"
+            :disabled="!canRemoveDevice"
+            :title="canRemoveDevice ? '删除设备' : '至少保留一个设备'"
+            @click="removeSenderDevice(device.id)"
+          >
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M5 12h14" />
             </svg>
@@ -281,40 +286,11 @@ onMounted(() => {
         </div>
       </div>
 
-      <p v-else class="empty-devices">添加设备后，Windows 会根据 Token 自动显示对应 iPhone 名称。</p>
-
       <div class="section-actions">
         <small :class="['field-hint', { error: senderDeviceInvalid }]">
           {{ senderDeviceHint }}
         </small>
-        <button
-          type="button"
-          class="text-button"
-          :disabled="senderDeviceInvalid"
-          @click="emit('saveSenderDevices')"
-        >
-          保存设备
-        </button>
       </div>
-    </section>
-
-    <section class="settings-section">
-      <div class="section-head compact">
-        <h3>通用校验</h3>
-        <span v-if="isTokenEnabled" class="token-badge">Token 已开启</span>
-      </div>
-
-      <label class="field">
-        <span>本地密钥</span>
-        <div class="control-row">
-          <input
-            :value="token"
-            placeholder="留空则不校验"
-            @input="emit('updateToken', ($event.target as HTMLInputElement).value)"
-          />
-          <button type="button" class="text-button" @click="emit('saveToken')">保存</button>
-        </div>
-      </label>
     </section>
 
     <section class="settings-section">
@@ -341,7 +317,7 @@ onMounted(() => {
       </div>
       <div class="step">
         <b>3</b>
-        <span>多设备建议发送 text、token；Windows 会根据 Token 自动识别设备。</span>
+        <span>多设备建议发送 text、id；Windows 会根据 ID 自动识别设备。</span>
       </div>
     </section>
 
@@ -412,7 +388,7 @@ h3 {
   line-height: 20px;
 }
 
-.token-badge {
+.id-badge {
   flex: 0 0 auto;
   padding: 4px 8px;
   border-radius: 999px;
@@ -554,6 +530,23 @@ h3 {
 .device-row input:focus {
   border-color: #1769e0;
   outline: 2px solid rgba(23, 105, 224, 0.12);
+}
+
+.device-row .device-id-input {
+  cursor: pointer;
+  color: #0b1b31;
+  background: #f8fafc;
+}
+
+.device-row .device-id-input:hover {
+  border-color: #b8c2d1;
+  background: #f1f6ff;
+}
+
+.device-row .device-id-input:focus {
+  border-color: #d7dde7;
+  outline: 0;
+  box-shadow: none;
 }
 
 .empty-devices {
