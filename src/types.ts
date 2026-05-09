@@ -16,4 +16,5 @@ export interface ReceiverStatus {
   tokenRequired: boolean
   receiverRunning: boolean
   notificationEnabled: boolean
+  defaultSender: string
 }

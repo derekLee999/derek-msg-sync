@@ -22,6 +22,7 @@ use tiny_http::{Header, Method, Response, Server, StatusCode};
 use uuid::Uuid;
 
 const DEFAULT_SERVER_PORT: u16 = 17866;
+const DEFAULT_SENDER: &str = "iPhone";
 const MIN_SERVER_PORT: u16 = 1024;
 const MAX_MESSAGES: usize = 100;
 const TRAY_EXIT_ID: &str = "quit";
@@ -62,6 +63,7 @@ struct ReceiverStatus {
     token_required: bool,
     receiver_running: bool,
     notification_enabled: bool,
+    default_sender: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -70,6 +72,8 @@ struct AppSettings {
     port: u16,
     #[serde(default = "default_notification_enabled")]
     notification_enabled: bool,
+    #[serde(default = "default_sender")]
+    default_sender: String,
 }
 
 struct AppState {
@@ -79,6 +83,7 @@ struct AppState {
     settings_path: PathBuf,
     port: Mutex<u16>,
     notification_enabled: Mutex<bool>,
+    default_sender: Mutex<String>,
     receiver: Mutex<Option<Arc<Server>>>,
 }
 
@@ -123,6 +128,7 @@ fn receiver_status(state: State<'_, Arc<AppState>>) -> ReceiverStatus {
         token_required: state.token.lock().expect("token state poisoned").is_some(),
         receiver_running: receiver_is_running(&state),
         notification_enabled: notifications_are_enabled(&state),
+        default_sender: current_default_sender(&state),
     }
 }
 
@@ -143,6 +149,16 @@ fn set_notification_enabled(enabled: bool, state: State<'_, Arc<AppState>>) -> R
         .notification_enabled
         .lock()
         .map_err(|_| "通知设置不可用".to_string())? = enabled;
+    persist_settings(&state)
+}
+
+#[tauri::command]
+fn set_default_sender(sender: String, state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    let state = state.inner().clone();
+    *state
+        .default_sender
+        .lock()
+        .map_err(|_| "发送方设置不可用".to_string())? = normalize_default_sender(&sender);
     persist_settings(&state)
 }
 
@@ -254,6 +270,23 @@ fn notifications_are_enabled(state: &Arc<AppState>) -> bool {
         .lock()
         .map(|enabled| *enabled)
         .unwrap_or(true)
+}
+
+fn current_default_sender(state: &Arc<AppState>) -> String {
+    state
+        .default_sender
+        .lock()
+        .map(|sender| normalize_default_sender(&sender))
+        .unwrap_or_else(|_| default_sender())
+}
+
+fn normalize_default_sender(sender: &str) -> String {
+    let sender = sender.trim();
+    if sender.is_empty() {
+        default_sender()
+    } else {
+        sender.to_string()
+    }
 }
 
 fn receiver_is_running(state: &Arc<AppState>) -> bool {
@@ -386,11 +419,7 @@ fn handle_request(mut request: tiny_http::Request, app: &AppHandle, state: &Arc<
 
     let message = IncomingMessage {
         id: Uuid::new_v4().to_string(),
-        sender: payload
-            .sender
-            .unwrap_or_else(|| "iPhone".to_string())
-            .trim()
-            .to_string(),
+        sender: normalize_request_sender(payload.sender, state),
         text,
         code,
         copied_text,
@@ -508,6 +537,7 @@ fn load_settings(path: PathBuf) -> AppSettings {
         .unwrap_or(AppSettings {
             port: DEFAULT_SERVER_PORT,
             notification_enabled: default_notification_enabled(),
+            default_sender: default_sender(),
         })
 }
 
@@ -515,6 +545,7 @@ fn persist_settings(state: &Arc<AppState>) -> Result<(), String> {
     let settings = AppSettings {
         port: current_port(state),
         notification_enabled: notifications_are_enabled(state),
+        default_sender: current_default_sender(state),
     };
 
     if let Some(parent) = state.settings_path.parent() {
@@ -527,6 +558,17 @@ fn persist_settings(state: &Arc<AppState>) -> Result<(), String> {
 
 fn default_notification_enabled() -> bool {
     true
+}
+
+fn default_sender() -> String {
+    DEFAULT_SENDER.to_string()
+}
+
+fn normalize_request_sender(sender: Option<String>, state: &Arc<AppState>) -> String {
+    sender
+        .map(|sender| sender.trim().to_string())
+        .filter(|sender| !sender.is_empty())
+        .unwrap_or_else(|| current_default_sender(state))
 }
 
 fn persist_messages(state: &Arc<AppState>) -> Result<(), String> {
@@ -624,6 +666,7 @@ pub fn run() {
                 settings_path,
                 port: Mutex::new(settings.port),
                 notification_enabled: Mutex::new(settings.notification_enabled),
+                default_sender: Mutex::new(normalize_default_sender(&settings.default_sender)),
                 receiver: Mutex::new(None),
             });
 
@@ -652,6 +695,7 @@ pub fn run() {
             receiver_status,
             set_receiver_token,
             set_notification_enabled,
+            set_default_sender,
             set_receiver_port,
             start_receiver_command,
             stop_receiver

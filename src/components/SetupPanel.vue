@@ -5,6 +5,7 @@ import { computed, onMounted, shallowRef, watch } from 'vue'
 
 const props = defineProps<{
   endpoint: string
+  defaultSender: string
   token: string
   isTokenEnabled: boolean
   notificationEnabled: boolean
@@ -12,8 +13,10 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
+  saveDefaultSender: []
   saveToken: []
   setNotificationEnabled: [enabled: boolean]
+  updateDefaultSender: [value: string]
   updateToken: [value: string]
   requestPortChange: [port: number]
 }>()
@@ -32,7 +35,7 @@ const portChanged = computed(() => !portInvalid.value && parsedPort.value !== pr
 
 const exampleJson = computed(() => {
   const payload: Record<string, string> = {
-    sender: 'iPhone',
+    sender: props.defaultSender.trim() || 'iPhone',
     text: '您的验证码是 123456，5 分钟内有效',
   }
 
@@ -171,6 +174,19 @@ onMounted(() => {
         </div>
         <small v-if="portInvalid" class="field-hint error">端口号需在 1024-65535 之间</small>
         <small v-else class="field-hint">修改端口后会重启接收服务并更新接收地址</small>
+      </label>
+
+      <label class="field">
+        <span>发送方名称</span>
+        <div class="control-row">
+          <input
+            :value="defaultSender"
+            placeholder="iPhone"
+            @input="emit('updateDefaultSender', ($event.target as HTMLInputElement).value)"
+          />
+          <button type="button" class="text-button" @click="emit('saveDefaultSender')">保存</button>
+        </div>
+        <small class="field-hint">快捷指令未发送 sender 时，消息将使用此名称</small>
       </label>
     </section>
 

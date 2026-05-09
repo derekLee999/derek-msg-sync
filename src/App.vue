@@ -16,6 +16,7 @@ const {
   error,
   lastReceived,
   token,
+  defaultSender,
   totalCount,
   endpoint,
   isTokenEnabled,
@@ -25,6 +26,7 @@ const {
   copyRecent,
   refresh,
   restartReceiverWithPort,
+  saveDefaultSender,
   saveToken,
   setNotificationEnabled,
   toggleReceiver,
@@ -218,11 +220,14 @@ async function handleNotificationChange(enabled: boolean) {
           <div class="modal-content">
           <SetupPanel
             :endpoint="endpoint"
+            :default-sender="defaultSender"
             :token="token"
             :is-token-enabled="isTokenEnabled"
             :notification-enabled="status?.notificationEnabled ?? true"
             :port="status?.port ?? 17866"
+            @save-default-sender="saveDefaultSender"
             @save-token="saveToken"
+            @update-default-sender="defaultSender = $event"
             @set-notification-enabled="handleNotificationChange"
             @update-token="token = $event"
             @request-port-change="requestPortChange"

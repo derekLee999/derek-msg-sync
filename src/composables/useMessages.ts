@@ -17,6 +17,7 @@ export function useMessages() {
   const error = shallowRef('')
   const lastReceived = shallowRef('')
   const token = shallowRef('')
+  const defaultSender = shallowRef('iPhone')
 
   const latestMessage = computed(() => messages.value[0] ?? null)
   const totalCount = computed(() => messages.value.length)
@@ -33,6 +34,7 @@ export function useMessages() {
       ])
       messages.value = nextMessages
       status.value = nextStatus
+      defaultSender.value = nextStatus.defaultSender || 'iPhone'
       lastReceived.value = nextMessages[0]?.copiedText ?? ''
     } catch (cause) {
       error.value = String(cause)
@@ -74,6 +76,17 @@ export function useMessages() {
     await refreshStatus()
   }
 
+  async function saveDefaultSender() {
+    error.value = ''
+    try {
+      await invoke('set_default_sender', { sender: defaultSender.value })
+      await refreshStatus()
+    } catch (cause) {
+      error.value = String(cause)
+      throw cause
+    }
+  }
+
   async function restartReceiverWithPort(port: number) {
     error.value = ''
     try {
@@ -98,6 +111,7 @@ export function useMessages() {
 
   async function refreshStatus() {
     status.value = await invoke<ReceiverStatus>('receiver_status')
+    defaultSender.value = status.value.defaultSender || 'iPhone'
   }
 
   async function toggleReceiver(options: ToggleReceiverOptions = {}) {
@@ -158,6 +172,7 @@ export function useMessages() {
     error,
     lastReceived,
     token,
+    defaultSender,
     latestMessage,
     totalCount,
     endpoint,
@@ -168,6 +183,7 @@ export function useMessages() {
     copyRecent,
     refresh,
     restartReceiverWithPort,
+    saveDefaultSender,
     saveToken,
     setNotificationEnabled,
     toggleReceiver,
