@@ -2,10 +2,12 @@
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart'
 import { computed, onMounted, shallowRef, watch } from 'vue'
+import type { SenderDevice } from '../types'
 
 const props = defineProps<{
   endpoint: string
   defaultSender: string
+  senderDevices: SenderDevice[]
   token: string
   isTokenEnabled: boolean
   notificationEnabled: boolean
@@ -14,9 +16,11 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   saveDefaultSender: []
+  saveSenderDevices: []
   saveToken: []
   setNotificationEnabled: [enabled: boolean]
   updateDefaultSender: [value: string]
+  updateSenderDevices: [devices: SenderDevice[]]
   updateToken: [value: string]
   requestPortChange: [port: number]
 }>()
@@ -32,15 +36,38 @@ const portInvalid = computed(() => {
   return !Number.isInteger(port) || port < 1024 || port > 65535
 })
 const portChanged = computed(() => !portInvalid.value && parsedPort.value !== props.port)
+const firstDevice = computed(() => props.senderDevices.find((device) => device.token.trim()) ?? null)
+const senderDeviceInvalid = computed(() =>
+  props.senderDevices.some((device) => !device.name.trim() || !device.token.trim()) || hasDuplicateDeviceToken.value,
+)
+const hasDuplicateDeviceToken = computed(() => {
+  const tokens = props.senderDevices.map((device) => device.token.trim()).filter(Boolean)
+  return new Set(tokens).size !== tokens.length
+})
+const senderDeviceHint = computed(() => {
+  if (hasDuplicateDeviceToken.value) {
+    return '设备 Token 不能重复'
+  }
+
+  if (senderDeviceInvalid.value) {
+    return '请补全设备名称和 Token 后保存'
+  }
+
+  return '快捷指令只需发送对应 Token，即可自动区分多部 iPhone'
+})
 
 const exampleJson = computed(() => {
   const payload: Record<string, string> = {
-    sender: props.defaultSender.trim() || 'iPhone',
     text: '您的验证码是 123456，5 分钟内有效',
   }
 
-  if (props.token.trim()) {
-    payload.token = props.token.trim()
+  if (firstDevice.value) {
+    payload.token = firstDevice.value.token.trim()
+  } else {
+    payload.sender = props.defaultSender.trim() || 'iPhone'
+    if (props.token.trim()) {
+      payload.token = props.token.trim()
+    }
   }
 
   return JSON.stringify(payload, null, 2)
@@ -88,6 +115,38 @@ function submitPortChange() {
   }
 
   emit('requestPortChange', parsedPort.value)
+}
+
+function addSenderDevice() {
+  emit('updateSenderDevices', [
+    ...props.senderDevices,
+    {
+      id: crypto.randomUUID(),
+      name: `iPhone ${props.senderDevices.length + 1}`,
+      token: '',
+    },
+  ])
+}
+
+function updateSenderDevice(id: string, field: 'name' | 'token', value: string) {
+  emit(
+    'updateSenderDevices',
+    props.senderDevices.map((device) =>
+      device.id === id
+        ? {
+            ...device,
+            [field]: value,
+          }
+        : device,
+    ),
+  )
+}
+
+function removeSenderDevice(id: string) {
+  emit(
+    'updateSenderDevices',
+    props.senderDevices.filter((device) => device.id !== id),
+  )
 }
 
 onMounted(() => {
@@ -192,7 +251,56 @@ onMounted(() => {
 
     <section class="settings-section">
       <div class="section-head compact">
-        <h3>安全校验</h3>
+        <h3>设备识别</h3>
+        <button type="button" class="small-button" @click="addSenderDevice">添加设备</button>
+      </div>
+
+      <div v-if="senderDevices.length" class="device-list">
+        <div v-for="device in senderDevices" :key="device.id" class="device-row">
+          <label>
+            <span>设备名称</span>
+            <input
+              :value="device.name"
+              placeholder="Derek iPhone"
+              @input="updateSenderDevice(device.id, 'name', ($event.target as HTMLInputElement).value)"
+            />
+          </label>
+          <label>
+            <span>设备 Token</span>
+            <input
+              :value="device.token"
+              placeholder="每部 iPhone 使用不同 Token"
+              @input="updateSenderDevice(device.id, 'token', ($event.target as HTMLInputElement).value)"
+            />
+          </label>
+          <button type="button" class="danger-button" title="删除设备" @click="removeSenderDevice(device.id)">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 12h14" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <p v-else class="empty-devices">添加设备后，Windows 会根据 Token 自动显示对应 iPhone 名称。</p>
+
+      <div class="section-actions">
+        <small :class="['field-hint', { error: senderDeviceInvalid }]">
+          {{ senderDeviceHint }}
+        </small>
+        <button
+          type="button"
+          class="text-button"
+          :disabled="senderDeviceInvalid"
+          @click="emit('saveSenderDevices')"
+        >
+          保存设备
+        </button>
+      </div>
+    </section>
+
+    <section class="settings-section">
+      <div class="section-head compact">
+        <h3>通用校验</h3>
         <span v-if="isTokenEnabled" class="token-badge">Token 已开启</span>
       </div>
 
@@ -233,7 +341,7 @@ onMounted(() => {
       </div>
       <div class="step">
         <b>3</b>
-        <span>发送 sender、text、token；Windows 会自动复制验证码。</span>
+        <span>多设备建议发送 text、token；Windows 会根据 Token 自动识别设备。</span>
       </div>
     </section>
 
@@ -332,6 +440,13 @@ h3 {
   color: #b42318;
 }
 
+.section-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .setting-row {
   display: flex;
   align-items: center;
@@ -400,6 +515,58 @@ h3 {
   outline: 2px solid rgba(23, 105, 224, 0.12);
 }
 
+.device-list {
+  display: grid;
+  gap: 8px;
+}
+
+.device-row {
+  display: grid;
+  grid-template-columns: minmax(116px, 0.82fr) minmax(160px, 1.18fr) 32px;
+  align-items: end;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #e7ebf1;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.device-row label {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  color: #465160;
+  font-size: 12px;
+}
+
+.device-row input {
+  min-width: 0;
+  width: 100%;
+  height: 34px;
+  padding: 0 9px;
+  border: 1px solid #d7dde7;
+  border-radius: 7px;
+  color: #17202f;
+  background: #ffffff;
+  font: inherit;
+}
+
+.device-row input:focus {
+  border-color: #1769e0;
+  outline: 2px solid rgba(23, 105, 224, 0.12);
+}
+
+.empty-devices {
+  margin: 0;
+  padding: 10px;
+  border: 1px dashed #d7dde7;
+  border-radius: 8px;
+  color: #667085;
+  background: #ffffff;
+  font-size: 13px;
+  line-height: 18px;
+}
+
 button {
   height: 36px;
   border: 0;
@@ -436,6 +603,35 @@ button:disabled {
   flex: 0 0 auto;
   padding: 0 14px;
   font-weight: 700;
+}
+
+.small-button {
+  height: 30px;
+  flex: 0 0 auto;
+  padding: 0 10px;
+  color: #1769e0;
+  background: #e8f1ff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.danger-button {
+  width: 32px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  color: #b42318;
+  background: #fee4e2;
+}
+
+.danger-button svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .quiet {
@@ -494,5 +690,24 @@ pre {
   margin: -3px 0 0;
   color: #0b7a56;
   font-size: 13px;
+}
+
+@media (max-width: 560px) {
+  .device-row {
+    grid-template-columns: minmax(0, 1fr) 32px;
+  }
+
+  .device-row label {
+    grid-column: 1 / -1;
+  }
+
+  .danger-button {
+    grid-column: 2;
+  }
+
+  .section-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 </style>

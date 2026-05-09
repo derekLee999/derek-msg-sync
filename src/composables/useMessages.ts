@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { computed, onMounted, onUnmounted, shallowRef } from 'vue'
-import type { IncomingMessage, ReceiverStatus } from '../types'
+import type { IncomingMessage, ReceiverStatus, SenderDevice } from '../types'
 
 const MAX_VISIBLE_MESSAGES = 100
 
@@ -18,6 +18,7 @@ export function useMessages() {
   const lastReceived = shallowRef('')
   const token = shallowRef('')
   const defaultSender = shallowRef('iPhone')
+  const senderDevices = shallowRef<SenderDevice[]>([])
 
   const latestMessage = computed(() => messages.value[0] ?? null)
   const totalCount = computed(() => messages.value.length)
@@ -35,6 +36,7 @@ export function useMessages() {
       messages.value = nextMessages
       status.value = nextStatus
       defaultSender.value = nextStatus.defaultSender || 'iPhone'
+      senderDevices.value = cloneSenderDevices(nextStatus.senderDevices)
       lastReceived.value = nextMessages[0]?.copiedText ?? ''
     } catch (cause) {
       error.value = String(cause)
@@ -87,6 +89,17 @@ export function useMessages() {
     }
   }
 
+  async function saveSenderDevices() {
+    error.value = ''
+    try {
+      await invoke('set_sender_devices', { devices: senderDevices.value })
+      await refreshStatus()
+    } catch (cause) {
+      error.value = String(cause)
+      throw cause
+    }
+  }
+
   async function restartReceiverWithPort(port: number) {
     error.value = ''
     try {
@@ -112,6 +125,7 @@ export function useMessages() {
   async function refreshStatus() {
     status.value = await invoke<ReceiverStatus>('receiver_status')
     defaultSender.value = status.value.defaultSender || 'iPhone'
+    senderDevices.value = cloneSenderDevices(status.value.senderDevices)
   }
 
   async function toggleReceiver(options: ToggleReceiverOptions = {}) {
@@ -173,6 +187,7 @@ export function useMessages() {
     lastReceived,
     token,
     defaultSender,
+    senderDevices,
     latestMessage,
     totalCount,
     endpoint,
@@ -184,8 +199,13 @@ export function useMessages() {
     refresh,
     restartReceiverWithPort,
     saveDefaultSender,
+    saveSenderDevices,
     saveToken,
     setNotificationEnabled,
     toggleReceiver,
   }
+}
+
+function cloneSenderDevices(devices: SenderDevice[] | undefined) {
+  return (devices ?? []).map((device) => ({ ...device }))
 }

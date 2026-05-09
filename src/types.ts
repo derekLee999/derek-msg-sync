@@ -17,4 +17,11 @@ export interface ReceiverStatus {
   receiverRunning: boolean
   notificationEnabled: boolean
   defaultSender: string
+  senderDevices: SenderDevice[]
+}
+
+export interface SenderDevice {
+  id: string
+  name: string
+  token: string
 }
