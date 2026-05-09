@@ -20,6 +20,10 @@ use tauri::{
 };
 use tiny_http::{Header, Method, Response, Server, StatusCode};
 use uuid::Uuid;
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
+    VIRTUAL_KEY, VK_CONTROL, VK_V,
+};
 
 const DEFAULT_SERVER_PORT: u16 = 17866;
 const DEFAULT_DEVICE_ID: &str = "default-iphone";
@@ -85,6 +89,7 @@ struct ReceiverStatus {
     receiver_running: bool,
     notification_enabled: bool,
     notification_position: NotificationPosition,
+    direct_paste_enabled: bool,
     sender_devices: Vec<SenderDevice>,
 }
 
@@ -97,6 +102,8 @@ struct AppSettings {
     #[serde(default = "default_notification_position")]
     notification_position: NotificationPosition,
     #[serde(default)]
+    direct_paste_enabled: bool,
+    #[serde(default)]
     sender_devices: Vec<SenderDevice>,
 }
 
@@ -107,6 +114,7 @@ struct AppState {
     port: Mutex<u16>,
     notification_enabled: Mutex<bool>,
     notification_position: Mutex<NotificationPosition>,
+    direct_paste_enabled: Mutex<bool>,
     sender_devices: Mutex<Vec<SenderDevice>>,
     receiver: Mutex<Option<Arc<Server>>>,
 }
@@ -152,6 +160,7 @@ fn receiver_status(state: State<'_, Arc<AppState>>) -> ReceiverStatus {
         receiver_running: receiver_is_running(&state),
         notification_enabled: notifications_are_enabled(&state),
         notification_position: current_notification_position(&state),
+        direct_paste_enabled: direct_paste_is_enabled(&state),
         sender_devices: current_sender_devices(&state),
     }
 }
@@ -180,6 +189,16 @@ fn set_notification_position(
 }
 
 #[tauri::command]
+fn set_direct_paste_enabled(enabled: bool, state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    let state = state.inner().clone();
+    *state
+        .direct_paste_enabled
+        .lock()
+        .map_err(|_| "直接粘贴设置不可用".to_string())? = enabled;
+    persist_settings(&state)
+}
+
+#[tauri::command]
 fn set_sender_devices(
     devices: Vec<SenderDevice>,
     state: State<'_, Arc<AppState>>,
@@ -204,6 +223,11 @@ fn start_receiver_command(app: AppHandle, state: State<'_, Arc<AppState>>) -> Re
 #[tauri::command]
 fn stop_receiver(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     stop_receiver_inner(state.inner())
+}
+
+#[tauri::command]
+fn paste_clipboard() -> Result<(), String> {
+    send_ctrl_v()
 }
 
 #[tauri::command]
@@ -312,6 +336,14 @@ fn current_notification_position(state: &Arc<AppState>) -> NotificationPosition 
         .lock()
         .map(|position| *position)
         .unwrap_or_else(|_| default_notification_position())
+}
+
+fn direct_paste_is_enabled(state: &Arc<AppState>) -> bool {
+    state
+        .direct_paste_enabled
+        .lock()
+        .map(|enabled| *enabled)
+        .unwrap_or(false)
 }
 
 fn current_sender_devices(state: &Arc<AppState>) -> Vec<SenderDevice> {
@@ -648,6 +680,7 @@ fn load_settings(path: PathBuf) -> AppSettings {
             port: DEFAULT_SERVER_PORT,
             notification_enabled: default_notification_enabled(),
             notification_position: default_notification_position(),
+            direct_paste_enabled: false,
             sender_devices: vec![default_sender_device()],
         })
 }
@@ -657,6 +690,7 @@ fn persist_settings(state: &Arc<AppState>) -> Result<(), String> {
         port: current_port(state),
         notification_enabled: notifications_are_enabled(state),
         notification_position: current_notification_position(state),
+        direct_paste_enabled: direct_paste_is_enabled(state),
         sender_devices: current_sender_devices(state),
     };
 
@@ -674,6 +708,37 @@ fn default_notification_enabled() -> bool {
 
 fn default_notification_position() -> NotificationPosition {
     NotificationPosition::BottomRight
+}
+
+fn send_ctrl_v() -> Result<(), String> {
+    let mut inputs = [
+        keyboard_input(VK_CONTROL, KEYBD_EVENT_FLAGS(0)),
+        keyboard_input(VK_V, KEYBD_EVENT_FLAGS(0)),
+        keyboard_input(VK_V, KEYEVENTF_KEYUP),
+        keyboard_input(VK_CONTROL, KEYEVENTF_KEYUP),
+    ];
+    let sent = unsafe { SendInput(&mut inputs, std::mem::size_of::<INPUT>() as i32) };
+
+    if sent == inputs.len() as u32 {
+        Ok(())
+    } else {
+        Err("模拟粘贴失败".to_string())
+    }
+}
+
+fn keyboard_input(key: VIRTUAL_KEY, flags: KEYBD_EVENT_FLAGS) -> INPUT {
+    INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: key,
+                wScan: 0,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    }
 }
 
 fn default_sender() -> String {
@@ -797,6 +862,9 @@ fn local_ipv4() -> Option<String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_main_window(app);
+        }))
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
@@ -819,6 +887,7 @@ pub fn run() {
                 port: Mutex::new(settings.port),
                 notification_enabled: Mutex::new(settings.notification_enabled),
                 notification_position: Mutex::new(settings.notification_position),
+                direct_paste_enabled: Mutex::new(settings.direct_paste_enabled),
                 sender_devices: Mutex::new(sender_devices),
                 receiver: Mutex::new(None),
             });
@@ -851,11 +920,21 @@ pub fn run() {
             receiver_status,
             set_notification_enabled,
             set_notification_position,
+            set_direct_paste_enabled,
             set_sender_devices,
             set_receiver_port,
+            paste_clipboard,
             start_receiver_command,
             stop_receiver
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+fn show_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
 }

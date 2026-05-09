@@ -114,6 +114,17 @@ export function useMessages() {
     }
   }
 
+  async function setDirectPasteEnabled(enabled: boolean) {
+    error.value = ''
+    try {
+      await invoke('set_direct_paste_enabled', { enabled })
+      await refreshStatus()
+    } catch (cause) {
+      error.value = String(cause)
+      throw cause
+    }
+  }
+
   async function refreshStatus() {
     status.value = await invoke<ReceiverStatus>('receiver_status')
     senderDevices.value = cloneSenderDevices(status.value.senderDevices)
@@ -147,9 +158,14 @@ export function useMessages() {
       writeText(event.payload.copiedText)
         .then(() => {
           lastReceived.value = event.payload.copiedText
+          if (status.value?.directPasteEnabled && event.payload.code) {
+            return invoke('paste_clipboard')
+          }
+
+          return undefined
         })
         .catch((cause) => {
-          error.value = `自动复制失败: ${String(cause)}`
+          error.value = `自动复制或粘贴失败: ${String(cause)}`
         })
       refreshStatus()
     })
@@ -186,6 +202,7 @@ export function useMessages() {
     copyRecent,
     refresh,
     restartReceiverWithPort,
+    setDirectPasteEnabled,
     setNotificationEnabled,
     setNotificationPosition,
     setSenderDevices,

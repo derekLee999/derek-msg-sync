@@ -20,12 +20,14 @@ const props = defineProps<{
   senderDevices: SenderDevice[]
   notificationEnabled: boolean
   notificationPosition: NotificationPosition
+  directPasteEnabled: boolean
   port: number
 }>()
 
 const emit = defineEmits<{
   setNotificationEnabled: [enabled: boolean]
   setNotificationPosition: [position: NotificationPosition]
+  setDirectPasteEnabled: [enabled: boolean]
   showToast: [text: string]
   updateSenderDevices: [devices: SenderDevice[]]
   requestPortChange: [port: number]
@@ -250,6 +252,21 @@ onMounted(() => {
             {{ option.label }}
           </button>
         </div>
+      </div>
+      <div class="setting-row">
+        <div>
+          <span>直接粘贴</span>
+          <small>收到验证码后复制到剪贴板，并向当前光标位置发送粘贴操作</small>
+        </div>
+        <button
+          type="button"
+          :class="['switch-button', { active: directPasteEnabled }]"
+          role="switch"
+          :aria-checked="directPasteEnabled"
+          @click="emit('setDirectPasteEnabled', !directPasteEnabled)"
+        >
+          <span></span>
+        </button>
       </div>
     </section>
 

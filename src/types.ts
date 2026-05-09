@@ -16,6 +16,7 @@ export interface ReceiverStatus {
   receiverRunning: boolean
   notificationEnabled: boolean
   notificationPosition: NotificationPosition
+  directPasteEnabled: boolean
   senderDevices: SenderDevice[]
 }
 

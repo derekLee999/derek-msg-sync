@@ -25,6 +25,7 @@ const {
   copyRecent,
   refresh,
   restartReceiverWithPort,
+  setDirectPasteEnabled,
   setNotificationEnabled,
   setNotificationPosition,
   setSenderDevices,
@@ -154,6 +155,15 @@ async function handleNotificationPositionChange(position: NotificationPosition) 
   }
 }
 
+async function handleDirectPasteChange(enabled: boolean) {
+  try {
+    await setDirectPasteEnabled(enabled)
+    showToast(enabled ? '直接粘贴已开启' : '直接粘贴已关闭')
+  } catch {
+    showToast('直接粘贴设置保存失败')
+  }
+}
+
 async function handleSenderDevicesChange(devices: typeof senderDevices.value) {
   try {
     await setSenderDevices(devices)
@@ -239,10 +249,12 @@ async function handleSenderDevicesChange(devices: typeof senderDevices.value) {
             :sender-devices="senderDevices"
             :notification-enabled="status?.notificationEnabled ?? true"
             :notification-position="status?.notificationPosition ?? 'bottomRight'"
+            :direct-paste-enabled="status?.directPasteEnabled ?? false"
             :port="status?.port ?? 17866"
             @update-sender-devices="handleSenderDevicesChange"
             @set-notification-enabled="handleNotificationChange"
             @set-notification-position="handleNotificationPositionChange"
+            @set-direct-paste-enabled="handleDirectPasteChange"
             @show-toast="showToast"
             @request-port-change="requestPortChange"
           />

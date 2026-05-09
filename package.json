@@ -1,11 +1,12 @@
 {
   "name": "derek-msg-sync",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.0.2",
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:server": "node scripts/start-dev-server.mjs",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "tauri": "tauri"
