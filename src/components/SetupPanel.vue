@@ -255,8 +255,8 @@ onMounted(() => {
       </div>
       <div class="setting-row">
         <div>
-          <span>直接粘贴</span>
-          <small>收到验证码后复制到剪贴板，并向当前光标位置发送粘贴操作</small>
+          <span>直接输入</span>
+          <small>收到验证码后复制到剪贴板，并向当前光标位置逐个字符输入验证码</small>
         </div>
         <button
           type="button"

@@ -159,13 +159,13 @@ export function useMessages() {
         .then(() => {
           lastReceived.value = event.payload.copiedText
           if (status.value?.directPasteEnabled && event.payload.code) {
-            return invoke('paste_clipboard')
+            return invoke('type_verification_code', { code: event.payload.code })
           }
 
           return undefined
         })
         .catch((cause) => {
-          error.value = `自动复制或粘贴失败: ${String(cause)}`
+          error.value = `自动复制或输入失败: ${String(cause)}`
         })
       refreshStatus()
     })

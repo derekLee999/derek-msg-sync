@@ -22,7 +22,7 @@ use tiny_http::{Header, Method, Response, Server, StatusCode};
 use uuid::Uuid;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
-    VIRTUAL_KEY, VK_CONTROL, VK_V,
+    KEYEVENTF_UNICODE, VIRTUAL_KEY,
 };
 
 const DEFAULT_SERVER_PORT: u16 = 17866;
@@ -194,7 +194,7 @@ fn set_direct_paste_enabled(enabled: bool, state: State<'_, Arc<AppState>>) -> R
     *state
         .direct_paste_enabled
         .lock()
-        .map_err(|_| "直接粘贴设置不可用".to_string())? = enabled;
+        .map_err(|_| "直接输入设置不可用".to_string())? = enabled;
     persist_settings(&state)
 }
 
@@ -226,8 +226,8 @@ fn stop_receiver(state: State<'_, Arc<AppState>>) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn paste_clipboard() -> Result<(), String> {
-    send_ctrl_v()
+fn type_verification_code(code: String) -> Result<(), String> {
+    type_text(&code)
 }
 
 #[tauri::command]
@@ -710,29 +710,36 @@ fn default_notification_position() -> NotificationPosition {
     NotificationPosition::BottomRight
 }
 
-fn send_ctrl_v() -> Result<(), String> {
-    let mut inputs = [
-        keyboard_input(VK_CONTROL, KEYBD_EVENT_FLAGS(0)),
-        keyboard_input(VK_V, KEYBD_EVENT_FLAGS(0)),
-        keyboard_input(VK_V, KEYEVENTF_KEYUP),
-        keyboard_input(VK_CONTROL, KEYEVENTF_KEYUP),
-    ];
+fn type_text(text: &str) -> Result<(), String> {
+    if text.is_empty() {
+        return Ok(());
+    }
+
+    let mut inputs: Vec<INPUT> = text
+        .encode_utf16()
+        .flat_map(|unit| {
+            [
+                unicode_input(unit, KEYEVENTF_UNICODE),
+                unicode_input(unit, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP),
+            ]
+        })
+        .collect();
     let sent = unsafe { SendInput(&mut inputs, std::mem::size_of::<INPUT>() as i32) };
 
     if sent == inputs.len() as u32 {
         Ok(())
     } else {
-        Err("模拟粘贴失败".to_string())
+        Err("模拟输入失败".to_string())
     }
 }
 
-fn keyboard_input(key: VIRTUAL_KEY, flags: KEYBD_EVENT_FLAGS) -> INPUT {
+fn unicode_input(unit: u16, flags: KEYBD_EVENT_FLAGS) -> INPUT {
     INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 {
             ki: KEYBDINPUT {
-                wVk: key,
-                wScan: 0,
+                wVk: VIRTUAL_KEY(0),
+                wScan: unit,
                 dwFlags: flags,
                 time: 0,
                 dwExtraInfo: 0,
@@ -923,7 +930,7 @@ pub fn run() {
             set_direct_paste_enabled,
             set_sender_devices,
             set_receiver_port,
-            paste_clipboard,
+            type_verification_code,
             start_receiver_command,
             stop_receiver
         ])

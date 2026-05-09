@@ -158,9 +158,9 @@ async function handleNotificationPositionChange(position: NotificationPosition) 
 async function handleDirectPasteChange(enabled: boolean) {
   try {
     await setDirectPasteEnabled(enabled)
-    showToast(enabled ? '直接粘贴已开启' : '直接粘贴已关闭')
+    showToast(enabled ? '直接输入已开启' : '直接输入已关闭')
   } catch {
-    showToast('直接粘贴设置保存失败')
+    showToast('直接输入设置保存失败')
   }
 }
 
