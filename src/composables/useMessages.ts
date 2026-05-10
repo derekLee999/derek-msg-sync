@@ -58,7 +58,7 @@ export function useMessages() {
       messages.value = nextMessages
       status.value = nextStatus
       senderDevices.value = cloneSenderDevices(nextStatus.senderDevices)
-      lastReceived.value = nextMessages[0]?.copiedText ?? ''
+      lastReceived.value = nextMessages.find((message) => message.code)?.code ?? ''
       void logFrontend(`刷新完成: ${nextMessages.length}条消息, 接收器${nextStatus.receiverRunning ? '已启动' : '已停止'}, 云端${nextStatus.relayRunning ? '已启动' : '已停止'}`)
     } catch (cause) {
       error.value = String(cause)
@@ -77,9 +77,15 @@ export function useMessages() {
     verificationFilterEnabled.value = enabled
   }
 
+  function clearError() {
+    error.value = ''
+  }
+
   async function copyMessage(message: IncomingMessage) {
     await writeText(message.copiedText)
-    lastReceived.value = message.copiedText
+    if (message.code) {
+      lastReceived.value = message.code
+    }
   }
 
   async function copyLocalIp() {
@@ -215,7 +221,9 @@ export function useMessages() {
       messages.value = [event.payload, ...messages.value].slice(0, MAX_VISIBLE_MESSAGES)
       writeText(event.payload.copiedText)
         .then(() => {
-          lastReceived.value = event.payload.copiedText
+          if (event.payload.code) {
+            lastReceived.value = event.payload.code
+          }
           if (status.value?.directPasteEnabled && event.payload.code) {
             return invoke('type_verification_code', { code: event.payload.code })
           }
@@ -259,6 +267,7 @@ export function useMessages() {
     visibleTotalCount,
     endpoint,
     clearMessages,
+    clearError,
     copyLocalIp,
     copyMessage,
     copyRecent,

@@ -46,7 +46,7 @@ const emit = defineEmits<{
       @click="emit('copyRecent')"
     >
       <p class="status-label">最近接收</p>
-      <strong>{{ lastReceived || '等待中...' }}</strong>
+      <strong>{{ lastReceived || '--' }}</strong>
     </button>
     <button type="button" class="refresh-icon-button" title="刷新状态" @click="emit('refresh')">
       <svg viewBox="0 0 24 24" aria-hidden="true">

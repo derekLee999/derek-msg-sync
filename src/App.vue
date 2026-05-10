@@ -21,6 +21,7 @@ const {
   totalCount,
   visibleTotalCount,
   endpoint,
+  clearError,
   clearMessages,
   copyLocalIp,
   copyMessage,
@@ -249,7 +250,14 @@ async function handleRelayConnectionTest(relay: { enabled: boolean; baseUrl: str
         @toggle-receiver="handleToggleReceiver"
       />
 
-      <p v-if="error" class="error-banner">{{ error }}</p>
+      <div v-if="error" class="error-banner">
+        <span>{{ error }}</span>
+        <button type="button" title="关闭错误提示" aria-label="关闭错误提示" @click="clearError">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m7 7 10 10M17 7 7 17" />
+          </svg>
+        </button>
+      </div>
 
       <MessageList
         :messages="visibleMessages"
@@ -425,11 +433,49 @@ async function handleRelayConnectionTest(relay: { enabled: boolean; baseUrl: str
 .error-banner {
   margin: 0;
   padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   border: 1px solid #ffd8d6;
   border-radius: 8px;
   color: #a63932;
   background: #fff1f0;
   font-size: 13px;
+}
+
+.error-banner span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.error-banner button {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  color: #a63932;
+  background: transparent;
+  cursor: pointer;
+}
+
+.error-banner button:hover {
+  background: #ffe4e2;
+}
+
+.error-banner svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .modal-backdrop {
