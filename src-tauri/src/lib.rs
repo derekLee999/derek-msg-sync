@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashSet, VecDeque},
     fs,
-    io::Read,
+    io::{Read, Write},
     net::{Ipv4Addr, UdpSocket},
     path::PathBuf,
     sync::{Arc, Mutex, OnceLock},
@@ -168,6 +168,24 @@ struct AppState {
     relay_running: Mutex<bool>,
     sender_devices: Mutex<Vec<SenderDevice>>,
     receiver: Mutex<Option<Arc<Server>>>,
+    log_path: PathBuf,
+}
+
+fn write_log(state: &Arc<AppState>, tag: &str, msg: &str) {
+    let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S%.3f").to_string();
+    let line = format!("[{}] [{}] {}\n", timestamp, tag, msg);
+    if let Ok(mut file) = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&state.log_path)
+    {
+        let _ = file.write_all(line.as_bytes());
+    }
+}
+
+#[tauri::command]
+fn log_message(state: State<'_, Arc<AppState>>, tag: String, msg: String) {
+    write_log(&state, &tag, &msg);
 }
 
 #[tauri::command]
@@ -525,9 +543,17 @@ fn stop_relay_client(state: &Arc<AppState>) -> Result<(), String> {
 }
 
 fn relay_poll_loop(app: AppHandle, state: Arc<AppState>) {
+    let relay = current_relay_settings(&state);
+    write_log(&state, "BACKEND", &format!(
+        "云端轮询启动: base_url={}, secret_len={}",
+        relay.base_url,
+        relay.secret.len()
+    ));
+
     let client = match Client::builder().timeout(Duration::from_secs(35)).build() {
         Ok(client) => client,
         Err(error) => {
+            write_log(&state, "BACKEND", &format!("云端客户端创建失败: {}", error));
             let _ = set_relay_running(&state, false);
             let _ = app.emit("receiver-error", format!("云端接入初始化失败: {}", error));
             return;
@@ -538,6 +564,7 @@ fn relay_poll_loop(app: AppHandle, state: Arc<AppState>) {
     while relay_is_running(&state) {
         let relay = current_relay_settings(&state);
         if !relay.enabled {
+            write_log(&state, "BACKEND", "云端已手动关闭");
             let _ = set_relay_running(&state, false);
             break;
         }
@@ -547,36 +574,70 @@ fn relay_poll_loop(app: AppHandle, state: Arc<AppState>) {
             poll_url.push_str("?after=");
             poll_url.push_str(&url_encode_query_value(&after));
         }
+        write_log(&state, "BACKEND", &format!("发送轮询请求: {}", poll_url));
         let request = client.get(&poll_url).bearer_auth(relay.secret);
 
         match request.send() {
-            Ok(response) if response.status().is_success() => {
-                match response.json::<RelayPollResponse>() {
-                    Ok(payload) => {
-                        for relay_message in payload.messages {
-                            if !relay_is_running(&state) {
-                                break;
-                            }
-                            after = relay_message.received_at.clone();
-                            if let Some(message) = message_from_relay(relay_message, &state) {
-                                store_message(&app, &state, message);
+            Ok(response) => {
+                let status = response.status();
+                write_log(&state, "BACKEND", &format!("收到响应: HTTP {}", status.as_u16()));
+
+                if status.is_success() {
+                    match response.text() {
+                        Ok(body) => {
+                            write_log(&state, "BACKEND", &format!("响应体 (前500字符): {}", 
+                                &body[..body.len().min(500)]));
+                            match serde_json::from_str::<RelayPollResponse>(&body) {
+                                Ok(payload) => {
+                                    write_log(&state, "BACKEND", &format!(
+                                        "解析成功, 消息数: {}", payload.messages.len()));
+                                    for relay_message in payload.messages {
+                                        if !relay_is_running(&state) {
+                                            break;
+                                        }
+                                        write_log(&state, "BACKEND", &format!(
+                                            "处理消息: relay_id={}, sender={}, text={}, id={}, received_at={}, remote_addr={}",
+                                            relay_message.relay_id,
+                                            relay_message.sender,
+                                            relay_message.text,
+                                            relay_message.device_id,
+                                            relay_message.received_at,
+                                            relay_message.remote_addr,
+                                        ));
+                                        after = relay_message.received_at.clone();
+                                        if let Some(message) = message_from_relay(relay_message, &state) {
+                                            write_log(&state, "BACKEND", "消息已存储并发送到前端");
+                                            store_message(&app, &state, message);
+                                        } else {
+                                            write_log(&state, "BACKEND", "消息被过滤: 设备ID未匹配");
+                                        }
+                                    }
+                                }
+                                Err(error) => {
+                                    write_log(&state, "BACKEND", &format!(
+                                        "JSON解析失败: {} | 原始响应体: {}", error, body));
+                                    let _ = app.emit("receiver-error", format!("云端消息解析失败: {}", error));
+                                    thread::sleep(DEFAULT_RELAY_POLL_INTERVAL);
+                                }
                             }
                         }
+                        Err(error) => {
+                            write_log(&state, "BACKEND", &format!("读取响应体失败: {}", error));
+                            let _ = app.emit("receiver-error", format!("云端消息解析失败: {}", error));
+                            thread::sleep(DEFAULT_RELAY_POLL_INTERVAL);
+                        }
                     }
-                    Err(error) => {
-                        let _ = app.emit("receiver-error", format!("云端消息解析失败: {}", error));
-                        thread::sleep(DEFAULT_RELAY_POLL_INTERVAL);
-                    }
+                } else {
+                    write_log(&state, "BACKEND", &format!("HTTP错误: {}", status.as_u16()));
+                    let _ = app.emit(
+                        "receiver-error",
+                        format!("云端接入失败: HTTP {}", status.as_u16()),
+                    );
+                    thread::sleep(DEFAULT_RELAY_POLL_INTERVAL);
                 }
             }
-            Ok(response) => {
-                let _ = app.emit(
-                    "receiver-error",
-                    format!("云端接入失败: HTTP {}", response.status()),
-                );
-                thread::sleep(DEFAULT_RELAY_POLL_INTERVAL);
-            }
             Err(error) => {
+                write_log(&state, "BACKEND", &format!("网络请求失败: {}", error));
                 if relay_is_running(&state) {
                     let _ = app.emit("receiver-error", format!("云端接入连接失败: {}", error));
                     thread::sleep(DEFAULT_RELAY_POLL_INTERVAL);
@@ -584,6 +645,7 @@ fn relay_poll_loop(app: AppHandle, state: Arc<AppState>) {
             }
         }
     }
+    write_log(&state, "BACKEND", "云端轮询线程退出");
 }
 
 fn url_encode_query_value(value: &str) -> String {
@@ -1190,6 +1252,7 @@ pub fn run() {
                 relay_running: Mutex::new(false),
                 sender_devices: Mutex::new(sender_devices),
                 receiver: Mutex::new(None),
+                log_path: app_data_dir.join("derek-msg-sync.log"),
             });
 
             app.manage(state.clone());
@@ -1232,7 +1295,8 @@ pub fn run() {
             set_receiver_port,
             type_verification_code,
             start_receiver_command,
-            stop_receiver
+            stop_receiver,
+            log_message
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

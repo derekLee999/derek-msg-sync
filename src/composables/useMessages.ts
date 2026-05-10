@@ -6,6 +6,14 @@ import type { IncomingMessage, NotificationPosition, ReceiverStatus, RelaySettin
 
 const MAX_VISIBLE_MESSAGES = 100
 
+async function logFrontend(msg: string) {
+  try {
+    await invoke('log_message', { tag: 'FRONTEND', msg })
+  } catch {
+    // Logging should never break the app
+  }
+}
+
 interface ToggleReceiverOptions {
   confirmStop?: () => boolean | Promise<boolean>
 }
@@ -34,6 +42,7 @@ export function useMessages() {
       status.value = nextStatus
       senderDevices.value = cloneSenderDevices(nextStatus.senderDevices)
       lastReceived.value = nextMessages[0]?.copiedText ?? ''
+      void logFrontend(`刷新完成: ${nextMessages.length}条消息, 接收器${nextStatus.receiverRunning ? '已启动' : '已停止'}, 云端${nextStatus.relayRunning ? '已启动' : '已停止'}`)
     } catch (cause) {
       error.value = String(cause)
     } finally {
@@ -127,21 +136,26 @@ export function useMessages() {
 
   async function setRelaySettings(relay: RelaySettings) {
     error.value = ''
+    void logFrontend(`设置云端: baseUrl=${relay.baseUrl}, enabled=${relay.enabled}, secretLen=${relay.secret?.length ?? 0}`)
     try {
       await invoke('set_relay_settings', { relay })
       await refreshStatus()
     } catch (cause) {
       error.value = String(cause)
+      void logFrontend(`设置云端失败: ${String(cause)}`)
       throw cause
     }
   }
 
   async function testRelayConnection(relay: RelaySettings) {
     error.value = ''
+    void logFrontend(`测试连接: ${relay.baseUrl}`)
     try {
       await invoke('test_relay_connection', { relay })
+      void logFrontend('测试连接成功')
     } catch (cause) {
       error.value = String(cause)
+      void logFrontend(`测试连接失败: ${String(cause)}`)
       throw cause
     }
   }
@@ -176,6 +190,7 @@ export function useMessages() {
 
     stopMessageListener = await listen<IncomingMessage>('message-received', (event) => {
       error.value = ''
+      void logFrontend(`收到消息: sender=${event.payload.sender}, code=${event.payload.code ?? '(无)'}, text=${event.payload.text?.substring(0, 50)}`)
       messages.value = [event.payload, ...messages.value].slice(0, MAX_VISIBLE_MESSAGES)
       writeText(event.payload.copiedText)
         .then(() => {
@@ -199,6 +214,7 @@ export function useMessages() {
 
     stopErrorListener = await listen<string>('receiver-error', (event) => {
       error.value = event.payload
+      void logFrontend(`错误: ${event.payload}`)
     })
   })
 
