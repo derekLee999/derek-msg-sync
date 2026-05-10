@@ -32,6 +32,7 @@ const DEFAULT_DEVICE_NAME: &str = "iPhone";
 const MIN_SERVER_PORT: u16 = 1024;
 const MAX_SENDER_DEVICES: usize = 5;
 const MAX_MESSAGES: usize = 100;
+const MAX_LOG_FILE_BYTES: u64 = 5 * 1024 * 1024;
 const TRAY_EXIT_ID: &str = "quit";
 const NOTIFICATION_LABEL: &str = "message-toast";
 const NOTIFICATION_WIDTH: f64 = 380.0;
@@ -47,6 +48,14 @@ enum NotificationPosition {
     TopRight,
     TopLeft,
     TopCenter,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum NotificationMode {
+    All,
+    Verification,
+    Off,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -129,7 +138,7 @@ struct ReceiverStatus {
     endpoint: String,
     message_count: usize,
     receiver_running: bool,
-    notification_enabled: bool,
+    notification_mode: NotificationMode,
     notification_position: NotificationPosition,
     direct_paste_enabled: bool,
     relay_enabled: bool,
@@ -143,8 +152,10 @@ struct ReceiverStatus {
 #[serde(rename_all = "camelCase")]
 struct AppSettings {
     port: u16,
-    #[serde(default = "default_notification_enabled")]
-    notification_enabled: bool,
+    #[serde(default = "default_notification_mode")]
+    notification_mode: NotificationMode,
+    #[serde(default)]
+    notification_enabled: Option<bool>,
     #[serde(default = "default_notification_position")]
     notification_position: NotificationPosition,
     #[serde(default)]
@@ -160,7 +171,7 @@ struct AppState {
     storage_path: PathBuf,
     settings_path: PathBuf,
     port: Mutex<u16>,
-    notification_enabled: Mutex<bool>,
+    notification_mode: Mutex<NotificationMode>,
     notification_position: Mutex<NotificationPosition>,
     direct_paste_enabled: Mutex<bool>,
     relay: Mutex<RelaySettings>,
@@ -168,11 +179,14 @@ struct AppState {
     sender_devices: Mutex<Vec<SenderDevice>>,
     receiver: Mutex<Option<Arc<Server>>>,
     log_path: PathBuf,
+    log_lock: Mutex<()>,
 }
 
 fn write_log(state: &Arc<AppState>, tag: &str, msg: &str) {
+    let _guard = state.log_lock.lock().ok();
     let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S%.3f").to_string();
     let line = format!("[{}] [{}] {}\n", timestamp, tag, msg);
+    rotate_log_if_needed(&state.log_path, line.len() as u64);
     if let Ok(mut file) = fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -180,6 +194,20 @@ fn write_log(state: &Arc<AppState>, tag: &str, msg: &str) {
     {
         let _ = file.write_all(line.as_bytes());
     }
+}
+
+fn rotate_log_if_needed(log_path: &PathBuf, next_line_bytes: u64) {
+    let Ok(metadata) = fs::metadata(log_path) else {
+        return;
+    };
+
+    if metadata.len().saturating_add(next_line_bytes) < MAX_LOG_FILE_BYTES {
+        return;
+    }
+
+    let archived_path = log_path.with_extension("log.old");
+    let _ = fs::remove_file(&archived_path);
+    let _ = fs::rename(log_path, archived_path);
 }
 
 #[tauri::command]
@@ -226,7 +254,7 @@ fn receiver_status(state: State<'_, Arc<AppState>>) -> ReceiverStatus {
         endpoint,
         message_count: state.messages.lock().expect("message state poisoned").len(),
         receiver_running: receiver_is_running(&state),
-        notification_enabled: notifications_are_enabled(&state),
+        notification_mode: current_notification_mode(&state),
         notification_position: current_notification_position(&state),
         direct_paste_enabled: direct_paste_is_enabled(&state),
         relay_enabled: current_relay_settings(&state).enabled,
@@ -238,12 +266,12 @@ fn receiver_status(state: State<'_, Arc<AppState>>) -> ReceiverStatus {
 }
 
 #[tauri::command]
-fn set_notification_enabled(enabled: bool, state: State<'_, Arc<AppState>>) -> Result<(), String> {
+fn set_notification_mode(mode: NotificationMode, state: State<'_, Arc<AppState>>) -> Result<(), String> {
     let state = state.inner().clone();
     *state
-        .notification_enabled
+        .notification_mode
         .lock()
-        .map_err(|_| "通知设置不可用".to_string())? = enabled;
+        .map_err(|_| "通知设置不可用".to_string())? = mode;
     persist_settings(&state)
 }
 
@@ -328,6 +356,7 @@ fn set_sender_devices(
         return Err(format!("最多只能添加 {} 个设备", MAX_SENDER_DEVICES));
     }
 
+    validate_sender_devices(&devices)?;
     let state = state.inner().clone();
     *state
         .sender_devices
@@ -443,12 +472,20 @@ fn validate_port(port: u16) -> Result<(), String> {
     Ok(())
 }
 
-fn notifications_are_enabled(state: &Arc<AppState>) -> bool {
+fn current_notification_mode(state: &Arc<AppState>) -> NotificationMode {
     state
-        .notification_enabled
+        .notification_mode
         .lock()
-        .map(|enabled| *enabled)
-        .unwrap_or(true)
+        .map(|mode| *mode)
+        .unwrap_or_else(|_| default_notification_mode())
+}
+
+fn should_show_notification(state: &Arc<AppState>, message: &IncomingMessage) -> bool {
+    match current_notification_mode(state) {
+        NotificationMode::All => true,
+        NotificationMode::Verification => message_has_verification_keyword(message),
+        NotificationMode::Off => false,
+    }
 }
 
 fn current_notification_position(state: &Arc<AppState>) -> NotificationPosition {
@@ -688,6 +725,21 @@ fn normalize_sender_devices(devices: Vec<SenderDevice>) -> Vec<SenderDevice> {
     }
 }
 
+fn validate_sender_devices(devices: &[SenderDevice]) -> Result<(), String> {
+    let mut seen_device_ids = HashSet::new();
+    for device in devices {
+        let device_id = device.device_id.trim();
+        if !is_valid_device_id(device_id) {
+            return Err("设备 ID 必须为 7 位数字".to_string());
+        }
+        if !seen_device_ids.insert(device_id.to_string()) {
+            return Err("设备 ID 不能重复".to_string());
+        }
+    }
+
+    Ok(())
+}
+
 fn unique_device_id(preferred: &str, seen_device_ids: &mut HashSet<String>) -> String {
     let preferred = preferred.trim();
     if is_valid_device_id(preferred) && seen_device_ids.insert(preferred.to_string()) {
@@ -864,10 +916,6 @@ fn message_from_relay(
     state: &Arc<AppState>,
 ) -> Option<IncomingMessage> {
     let device_id = relay_message.device_id.trim().to_string();
-    if sender_for_device_id(&device_id, state).is_none() {
-        return None;
-    }
-
     let text = relay_message.text.trim().to_string();
     let code = normalize_code(&relay_message.code).or_else(|| extract_code(&text));
     let copied_text = code.clone().unwrap_or_else(|| text.clone());
@@ -907,7 +955,7 @@ fn store_message(app: &AppHandle, state: &Arc<AppState>, message: IncomingMessag
     if let Err(error) = persist_messages(state) {
         let _ = app.emit("receiver-error", format!("保存本地消息失败: {}", error));
     }
-    if notifications_are_enabled(state) {
+    if should_show_notification(state, &message) {
         show_message_notification(app, &message, current_notification_position(state));
     }
     let _ = app.emit("message-received", message);
@@ -1025,10 +1073,12 @@ fn load_settings(path: PathBuf) -> AppSettings {
     fs::read_to_string(path)
         .ok()
         .and_then(|content| serde_json::from_str::<AppSettings>(&content).ok())
+        .map(normalize_loaded_settings)
         .filter(|settings| validate_port(settings.port).is_ok())
         .unwrap_or(AppSettings {
             port: DEFAULT_SERVER_PORT,
-            notification_enabled: default_notification_enabled(),
+            notification_mode: default_notification_mode(),
+            notification_enabled: None,
             notification_position: default_notification_position(),
             direct_paste_enabled: false,
             relay: RelaySettings::default(),
@@ -1039,7 +1089,8 @@ fn load_settings(path: PathBuf) -> AppSettings {
 fn persist_settings(state: &Arc<AppState>) -> Result<(), String> {
     let settings = AppSettings {
         port: current_port(state),
-        notification_enabled: notifications_are_enabled(state),
+        notification_mode: current_notification_mode(state),
+        notification_enabled: None,
         notification_position: current_notification_position(state),
         direct_paste_enabled: direct_paste_is_enabled(state),
         relay: current_relay_settings(state),
@@ -1054,8 +1105,21 @@ fn persist_settings(state: &Arc<AppState>) -> Result<(), String> {
     fs::write(&state.settings_path, content).map_err(|error| error.to_string())
 }
 
-fn default_notification_enabled() -> bool {
-    true
+fn normalize_loaded_settings(mut settings: AppSettings) -> AppSettings {
+    if let Some(enabled) = settings.notification_enabled {
+        settings.notification_mode = if enabled {
+            NotificationMode::Verification
+        } else {
+            NotificationMode::Off
+        };
+        settings.notification_enabled = None;
+    }
+
+    settings
+}
+
+fn default_notification_mode() -> NotificationMode {
+    NotificationMode::Verification
 }
 
 fn default_notification_position() -> NotificationPosition {
@@ -1208,6 +1272,11 @@ fn extract_code(text: &str) -> Option<String> {
         .map(|matched| matched.as_str().to_string())
 }
 
+fn message_has_verification_keyword(message: &IncomingMessage) -> bool {
+    let content = format!("{} {}", message.text, message.copied_text);
+    content.contains("验证码") || content.contains("校验码")
+}
+
 fn local_ipv4() -> Option<String> {
     let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
     socket.connect(("8.8.8.8", 80)).ok()?;
@@ -1244,7 +1313,7 @@ pub fn run() {
                 storage_path,
                 settings_path,
                 port: Mutex::new(settings.port),
-                notification_enabled: Mutex::new(settings.notification_enabled),
+                notification_mode: Mutex::new(settings.notification_mode),
                 notification_position: Mutex::new(settings.notification_position),
                 direct_paste_enabled: Mutex::new(settings.direct_paste_enabled),
                 relay: Mutex::new(settings.relay),
@@ -1252,6 +1321,7 @@ pub fn run() {
                 sender_devices: Mutex::new(sender_devices),
                 receiver: Mutex::new(None),
                 log_path: app_data_dir.join("derek-msg-sync.log"),
+                log_lock: Mutex::new(()),
             });
 
             app.manage(state.clone());
@@ -1285,7 +1355,7 @@ pub fn run() {
             get_messages,
             clear_messages,
             receiver_status,
-            set_notification_enabled,
+            set_notification_mode,
             set_notification_position,
             set_direct_paste_enabled,
             set_relay_settings,

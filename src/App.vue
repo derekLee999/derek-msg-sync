@@ -8,16 +8,18 @@ import SetupPanel from './components/SetupPanel.vue'
 import StatusBar from './components/StatusBar.vue'
 import { useMessages } from './composables/useMessages'
 import { useToast } from './composables/useToast'
-import type { NotificationPosition } from './types'
+import type { NotificationMode, NotificationPosition } from './types'
 
 const {
-  messages,
+  visibleMessages,
   status,
   loading,
   error,
   lastReceived,
   senderDevices,
+  verificationFilterEnabled,
   totalCount,
+  visibleTotalCount,
   endpoint,
   clearMessages,
   copyLocalIp,
@@ -26,7 +28,8 @@ const {
   refresh,
   restartReceiverWithPort,
   setDirectPasteEnabled,
-  setNotificationEnabled,
+  setVerificationFilterEnabled,
+  setNotificationMode,
   setNotificationPosition,
   setRelaySettings,
   setSenderDevices,
@@ -139,10 +142,15 @@ async function confirmPortChange() {
   }
 }
 
-async function handleNotificationChange(enabled: boolean) {
+async function handleNotificationModeChange(mode: NotificationMode) {
   try {
-    await setNotificationEnabled(enabled)
-    showToast(enabled ? '通知已开启' : '通知已关闭')
+    await setNotificationMode(mode)
+    const messages: Record<NotificationMode, string> = {
+      all: '通知模式：全部',
+      verification: '通知模式：验证码',
+      off: '通知已关闭',
+    }
+    showToast(messages[mode])
   } catch {
     showToast('通知设置保存失败')
   }
@@ -244,11 +252,14 @@ async function handleRelayConnectionTest(relay: { enabled: boolean; baseUrl: str
       <p v-if="error" class="error-banner">{{ error }}</p>
 
       <MessageList
-        :messages="messages"
+        :messages="visibleMessages"
         :loading="loading"
+        :verification-filter-enabled="verificationFilterEnabled"
         :total-count="totalCount"
+        :visible-count="visibleTotalCount"
         @clear="openClearConfirm"
         @copy="copyMessage"
+        @toggle-verification-filter="setVerificationFilterEnabled"
       />
     </main>
 
@@ -267,7 +278,7 @@ async function handleRelayConnectionTest(relay: { enabled: boolean; baseUrl: str
           <SetupPanel
             :endpoint="endpoint"
             :sender-devices="senderDevices"
-            :notification-enabled="status?.notificationEnabled ?? true"
+            :notification-mode="status?.notificationMode ?? 'verification'"
             :notification-position="status?.notificationPosition ?? 'bottomRight'"
             :direct-paste-enabled="status?.directPasteEnabled ?? false"
             :relay-enabled="status?.relayEnabled ?? false"
@@ -276,7 +287,7 @@ async function handleRelayConnectionTest(relay: { enabled: boolean; baseUrl: str
             :relay-secret="status?.relaySecret ?? ''"
             :port="status?.port ?? 17866"
             @update-sender-devices="handleSenderDevicesChange"
-            @set-notification-enabled="handleNotificationChange"
+            @set-notification-mode="handleNotificationModeChange"
             @set-notification-position="handleNotificationPositionChange"
             @set-direct-paste-enabled="handleDirectPasteChange"
             @set-relay-settings="handleRelaySettingsChange"

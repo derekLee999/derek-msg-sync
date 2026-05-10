@@ -6,11 +6,14 @@ const props = defineProps<{
   messages: IncomingMessage[]
   loading: boolean
   totalCount: number
+  visibleCount: number
+  verificationFilterEnabled: boolean
 }>()
 
 const emit = defineEmits<{
   clear: []
   copy: [message: IncomingMessage]
+  toggleVerificationFilter: [enabled: boolean]
 }>()
 
 const hasMessages = computed(() => props.messages.length > 0)
@@ -59,20 +62,40 @@ function highlightText(message: IncomingMessage) {
   <section class="message-panel">
     <div class="panel-head">
       <div>
-        <h2 class="panel-title">消息收件台 <span>{{ totalCount }}</span></h2>
+        <h2 class="panel-title">
+          消息收件台
+          <span>{{ verificationFilterEnabled ? visibleCount : totalCount }}</span>
+        </h2>
       </div>
-      <button type="button" :disabled="!hasMessages" title="清空消息" @click="emit('clear')">清空</button>
+      <div class="panel-actions">
+        <button
+          type="button"
+          :class="['filter-toggle', { active: verificationFilterEnabled }]"
+          role="switch"
+          :aria-checked="verificationFilterEnabled"
+          title="开启后仅显示包含验证码和校验码关键字的消息"
+          @click="emit('toggleVerificationFilter', !verificationFilterEnabled)"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 5h16l-6 7v5l-4 2v-7L4 5Z" />
+          </svg>
+          {{ verificationFilterEnabled ? '验证码' : '全部' }}
+        </button>
+        <button type="button" :disabled="totalCount === 0" title="清空消息" @click="emit('clear')">清空</button>
+      </div>
     </div>
 
     <div v-if="loading" class="empty-state">正在连接本地接收服务...</div>
 
     <div v-else-if="!hasMessages" class="empty-state">
-      <strong>等待第一条 iPhone 消息</strong>
-      <span>收到短信后，验证码会立即进入 Windows 剪切板。</span>
+      <strong>{{ totalCount > 0 ? '没有匹配的验证码消息' : '等待第一条 iPhone 消息' }}</strong>
+      <span>
+        {{ totalCount > 0 ? '关闭筛选可查看全部消息。' : '收到短信后，验证码会立即进入 Windows 剪切板。' }}
+      </span>
     </div>
 
     <div v-else class="message-list">
-      <article v-for="message in messages" :key="message.id" class="message-item">
+      <article v-for="message in messages" :key="message.id" :class="['message-item', { plain: !message.code }]">
         <div class="message-main">
           <p class="message-text">
             <template v-for="part in highlightText(message)" :key="part.text">
@@ -85,8 +108,8 @@ function highlightText(message: IncomingMessage) {
             <span>{{ message.sender || 'iPhone' }}</span>
           </div>
         </div>
-        <button type="button" class="code-button" title="再次复制" @click="emit('copy', message)">
-          <span>{{ message.code ?? message.copiedText }}</span>
+        <button v-if="message.code" type="button" class="code-button" title="再次复制" @click="emit('copy', message)">
+          <span>{{ message.code }}</span>
         </button>
       </article>
     </div>
@@ -137,6 +160,12 @@ function highlightText(message: IncomingMessage) {
   vertical-align: 2px;
 }
 
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 button {
   height: 34px;
   border: 0;
@@ -155,6 +184,38 @@ button:disabled {
 
 .panel-head button {
   padding: 0 13px;
+}
+
+.filter-toggle {
+  min-width: 84px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  color: #465160;
+  background: #eef1f5;
+  font-weight: 700;
+}
+
+.filter-toggle svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.filter-toggle:hover {
+  color: #1769e0;
+  background: #e8f1ff;
+}
+
+.filter-toggle.active {
+  color: #ffffff;
+  background: #1769e0;
 }
 
 .empty-state {
@@ -189,6 +250,10 @@ button:disabled {
   border: 1px solid #e7ebf1;
   border-radius: 8px;
   background: #fbfcfe;
+}
+
+.message-item.plain {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .message-main {

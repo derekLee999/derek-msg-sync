@@ -14,7 +14,7 @@ export interface ReceiverStatus {
   endpoint: string
   messageCount: number
   receiverRunning: boolean
-  notificationEnabled: boolean
+  notificationMode: NotificationMode
   notificationPosition: NotificationPosition
   directPasteEnabled: boolean
   relayEnabled: boolean
@@ -25,6 +25,7 @@ export interface ReceiverStatus {
 }
 
 export type NotificationPosition = 'bottomRight' | 'bottomLeft' | 'topRight' | 'topLeft' | 'topCenter'
+export type NotificationMode = 'all' | 'verification' | 'off'
 
 export interface SenderDevice {
   id: string

@@ -2,9 +2,17 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { computed, onMounted, onUnmounted, shallowRef } from 'vue'
-import type { IncomingMessage, NotificationPosition, ReceiverStatus, RelaySettings, SenderDevice } from '../types'
+import type {
+  IncomingMessage,
+  NotificationMode,
+  NotificationPosition,
+  ReceiverStatus,
+  RelaySettings,
+  SenderDevice,
+} from '../types'
 
 const MAX_VISIBLE_MESSAGES = 100
+const VERIFICATION_KEYWORDS = ['验证码', '校验码']
 
 async function logFrontend(msg: string) {
   try {
@@ -25,9 +33,18 @@ export function useMessages() {
   const error = shallowRef('')
   const lastReceived = shallowRef('')
   const senderDevices = shallowRef<SenderDevice[]>([])
+  const verificationFilterEnabled = shallowRef(true)
 
   const latestMessage = computed(() => messages.value[0] ?? null)
   const totalCount = computed(() => messages.value.length)
+  const visibleMessages = computed(() => {
+    if (!verificationFilterEnabled.value) {
+      return messages.value
+    }
+
+    return messages.value.filter(hasVerificationKeyword)
+  })
+  const visibleTotalCount = computed(() => visibleMessages.value.length)
   const endpoint = computed(() => status.value?.endpoint ?? `http://<Windows局域网IP>:${status.value?.port ?? 17866}/otp`)
 
   async function refresh() {
@@ -54,6 +71,10 @@ export function useMessages() {
     await invoke('clear_messages')
     messages.value = []
     await refreshStatus()
+  }
+
+  function setVerificationFilterEnabled(enabled: boolean) {
+    verificationFilterEnabled.value = enabled
   }
 
   async function copyMessage(message: IncomingMessage) {
@@ -101,10 +122,10 @@ export function useMessages() {
     }
   }
 
-  async function setNotificationEnabled(enabled: boolean) {
+  async function setNotificationMode(mode: NotificationMode) {
     error.value = ''
     try {
-      await invoke('set_notification_enabled', { enabled })
+      await invoke('set_notification_mode', { mode })
       await refreshStatus()
     } catch (cause) {
       error.value = String(cause)
@@ -226,13 +247,16 @@ export function useMessages() {
 
   return {
     messages,
+    visibleMessages,
     status,
     loading,
     error,
     lastReceived,
     senderDevices,
+    verificationFilterEnabled,
     latestMessage,
     totalCount,
+    visibleTotalCount,
     endpoint,
     clearMessages,
     copyLocalIp,
@@ -241,7 +265,8 @@ export function useMessages() {
     refresh,
     restartReceiverWithPort,
     setDirectPasteEnabled,
-    setNotificationEnabled,
+    setVerificationFilterEnabled,
+    setNotificationMode,
     setNotificationPosition,
     setRelaySettings,
     setSenderDevices,
@@ -261,4 +286,9 @@ function cloneSenderDevices(devices: SenderDevice[] | undefined) {
           deviceId: '',
         },
       ]
+}
+
+function hasVerificationKeyword(message: IncomingMessage) {
+  const content = `${message.text ?? ''} ${message.copiedText ?? ''}`
+  return VERIFICATION_KEYWORDS.some((keyword) => content.includes(keyword))
 }

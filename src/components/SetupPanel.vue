@@ -3,7 +3,7 @@ import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart'
 import { computed, onMounted, shallowRef, watch } from 'vue'
-import type { NotificationPosition, RelaySettings, SenderDevice } from '../types'
+import type { NotificationMode, NotificationPosition, RelaySettings, SenderDevice } from '../types'
 
 const MAX_SENDER_DEVICES = 5
 const SHORTCUT_EXAMPLE_URL = 'https://www.icloud.com/shortcuts/d02d0af4323b403d8c4269019bb6f11f'
@@ -14,11 +14,16 @@ const NOTIFICATION_POSITION_OPTIONS: Array<{ label: string; value: NotificationP
   { label: '左上', value: 'topLeft' },
   { label: '中上', value: 'topCenter' },
 ]
+const NOTIFICATION_MODE_OPTIONS: Array<{ label: string; value: NotificationMode }> = [
+  { label: '全部', value: 'all' },
+  { label: '验证码', value: 'verification' },
+  { label: '关闭', value: 'off' },
+]
 
 const props = defineProps<{
   endpoint: string
   senderDevices: SenderDevice[]
-  notificationEnabled: boolean
+  notificationMode: NotificationMode
   notificationPosition: NotificationPosition
   directPasteEnabled: boolean
   relayEnabled: boolean
@@ -29,7 +34,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  setNotificationEnabled: [enabled: boolean]
+  setNotificationMode: [mode: NotificationMode]
   setNotificationPosition: [position: NotificationPosition]
   setDirectPasteEnabled: [enabled: boolean]
   setRelaySettings: [relay: RelaySettings]
@@ -49,6 +54,7 @@ const autostartBusy = shallowRef(false)
 const portInput = shallowRef(String(props.port))
 const relayBaseUrlInput = shallowRef(props.relayBaseUrl)
 const relaySecretInput = shallowRef(props.relaySecret)
+const deviceIdDrafts = shallowRef<Record<string, string>>({})
 
 const parsedPort = computed(() => Number.parseInt(portInput.value, 10))
 const portInvalid = computed(() => {
@@ -58,13 +64,21 @@ const portInvalid = computed(() => {
 const portChanged = computed(() => !portInvalid.value && parsedPort.value !== props.port)
 const firstDevice = computed(() => props.senderDevices.find((device) => device.deviceId.trim()) ?? null)
 const canRemoveDevice = computed(() => props.senderDevices.length > 1)
-const senderDeviceInvalid = computed(() => props.senderDevices.some((device) => !device.name.trim()))
+const senderDeviceInvalid = computed(() =>
+  props.senderDevices.some((device) => !device.name.trim() || !isValidDeviceId(device.deviceId)),
+)
 const senderDeviceHint = computed(() => {
-  if (senderDeviceInvalid.value) {
+  if (props.senderDevices.some((device) => !device.name.trim())) {
     return '请填写设备名称'
   }
+  if (props.senderDevices.some((device) => !isValidDeviceId(device.deviceId))) {
+    return '设备 ID 必须为 7 位数字'
+  }
+  if (hasDuplicateDeviceId(props.senderDevices)) {
+    return '设备 ID 不能重复'
+  }
 
-  return '设备 ID 由系统生成且不可修改，快捷指令只需发送对应 ID'
+  return '设备 ID 可修改，需保持 7 位数字且不能重复'
 })
 
 const copiedTip = computed(() => {
@@ -148,6 +162,17 @@ watch(
     relaySecretInput.value = secret
   },
 )
+watch(
+  () => props.senderDevices,
+  (devices) => {
+    const nextDrafts: Record<string, string> = {}
+    for (const device of devices) {
+      nextDrafts[device.id] = deviceIdDrafts.value[device.id] ?? device.deviceId
+    }
+    deviceIdDrafts.value = nextDrafts
+  },
+  { immediate: true },
+)
 
 async function copyEndpoint() {
   await writeText(props.endpoint)
@@ -183,6 +208,45 @@ function escapePowerShellSingleQuoted(value: string) {
   return value.replace(/'/g, "''")
 }
 
+function isValidDeviceId(deviceId: string) {
+  return /^\d{7}$/.test(deviceId.trim())
+}
+
+function hasDuplicateDeviceId(devices: SenderDevice[]) {
+  const seen = new Set<string>()
+  for (const device of devices) {
+    const deviceId = device.deviceId.trim()
+    if (!isValidDeviceId(deviceId)) {
+      continue
+    }
+    if (seen.has(deviceId)) {
+      return true
+    }
+    seen.add(deviceId)
+  }
+
+  return false
+}
+
+function generateDeviceId() {
+  const existingIds = new Set(props.senderDevices.map((device) => device.deviceId.trim()))
+  const values = new Uint32Array(1)
+  for (let index = 0; index < 100; index += 1) {
+    crypto.getRandomValues(values)
+    const deviceId = String(1_000_000 + (values[0] % 9_000_000))
+    if (!existingIds.has(deviceId)) {
+      return deviceId
+    }
+  }
+
+  return String(Math.floor(1_000_000 + Math.random() * 9_000_000))
+}
+
+function deviceIdInvalid(deviceId: string) {
+  const normalized = deviceId.trim()
+  return normalized.length > 0 && !isValidDeviceId(normalized)
+}
+
 async function openShortcutExample() {
   try {
     await openUrl(SHORTCUT_EXAMPLE_URL)
@@ -200,6 +264,24 @@ async function copyDeviceId(deviceId: string) {
 
   await writeText(normalizedDeviceId)
   emit('showToast', '设备 ID 已复制')
+}
+
+function validateDeviceIdChange(deviceId: string, deviceIdOwner: string) {
+  const normalized = deviceId.trim()
+  if (!isValidDeviceId(normalized)) {
+    emit('showToast', '设备 ID 必须为 7 位数字')
+    return null
+  }
+
+  const duplicated = props.senderDevices.some(
+    (device) => device.id !== deviceIdOwner && device.deviceId.trim() === normalized,
+  )
+  if (duplicated) {
+    emit('showToast', '设备 ID 不能重复')
+    return null
+  }
+
+  return normalized
 }
 
 async function refreshAutostart() {
@@ -256,7 +338,7 @@ function addSenderDevice() {
     {
       id: crypto.randomUUID(),
       name: `iPhone ${props.senderDevices.length + 1}`,
-      deviceId: '',
+      deviceId: generateDeviceId(),
     },
   ])
 }
@@ -273,6 +355,45 @@ function updateSenderDevice(id: string, value: string) {
         : device,
     ),
   )
+}
+
+function updateSenderDeviceId(id: string, value: string) {
+  deviceIdDrafts.value = {
+    ...deviceIdDrafts.value,
+    [id]: value,
+  }
+
+  if (value.trim().length < 7) {
+    return
+  }
+
+  const deviceId = validateDeviceIdChange(value, id)
+  if (!deviceId) {
+    return
+  }
+
+  emit(
+    'updateSenderDevices',
+    props.senderDevices.map((device) =>
+      device.id === id
+        ? {
+            ...device,
+            deviceId,
+          }
+        : device,
+    ),
+  )
+}
+
+function validateDeviceIdBlur(id: string) {
+  const draft = deviceIdDrafts.value[id] ?? ''
+  const deviceId = validateDeviceIdChange(draft, id)
+  if (!deviceId) {
+    deviceIdDrafts.value = {
+      ...deviceIdDrafts.value,
+      [id]: props.senderDevices.find((device) => device.id === id)?.deviceId ?? '',
+    }
+  }
 }
 
 function removeSenderDevice(id: string) {
@@ -313,19 +434,21 @@ onMounted(() => {
       <div class="setting-row">
         <div>
           <span>接收通知</span>
-          <small>收到 iPhone 消息后显示浮动通知</small>
+          <small>选择收到消息后的浮动通知范围</small>
         </div>
-        <button
-          type="button"
-          :class="['switch-button', { active: notificationEnabled }]"
-          role="switch"
-          :aria-checked="notificationEnabled"
-          @click="emit('setNotificationEnabled', !notificationEnabled)"
-        >
-          <span></span>
-        </button>
+        <div class="mode-segmented-control" role="group" aria-label="接收通知模式">
+          <button
+            v-for="option in NOTIFICATION_MODE_OPTIONS"
+            :key="option.value"
+            type="button"
+            :class="{ active: notificationMode === option.value }"
+            @click="emit('setNotificationMode', option.value)"
+          >
+            {{ option.label }}
+          </button>
+        </div>
       </div>
-      <div v-if="notificationEnabled" class="notification-position-row">
+      <div v-if="notificationMode !== 'off'" class="notification-position-row">
         <span>通知位置</span>
         <div class="segmented-control" role="group" aria-label="通知显示位置">
           <button
@@ -527,10 +650,14 @@ onMounted(() => {
             <span>设备 ID</span>
             <input
               class="device-id-input"
-              :value="device.deviceId || '自动生成'"
-              readonly
-              title="点击复制设备 ID"
-              @click="copyDeviceId(device.deviceId)"
+              :class="{ invalid: deviceIdInvalid(deviceIdDrafts[device.id] ?? device.deviceId) }"
+              :value="deviceIdDrafts[device.id] ?? device.deviceId"
+              inputmode="numeric"
+              maxlength="7"
+              placeholder="7位数字"
+              title="设备 ID 必须为 7 位数字"
+              @input="updateSenderDeviceId(device.id, ($event.target as HTMLInputElement).value.replace(/\D/g, '').slice(0, 7))"
+              @blur="validateDeviceIdBlur(device.id)"
             />
           </label>
           <button
@@ -542,6 +669,17 @@ onMounted(() => {
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M5 12h14" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            class="copy-device-button"
+            title="复制设备 ID"
+            @click="copyDeviceId(device.deviceId)"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M8 8h10v10H8z" />
+              <path d="M6 14H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v1" />
             </svg>
           </button>
         </div>
@@ -892,6 +1030,37 @@ h3 {
   background: #1769e0;
 }
 
+.mode-segmented-control {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: repeat(3, 58px);
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid #d7dde7;
+  border-radius: 7px;
+  background: #ffffff;
+}
+
+.mode-segmented-control button {
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 5px;
+  color: #465160;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mode-segmented-control button:hover {
+  color: #1769e0;
+  background: #edf4ff;
+}
+
+.mode-segmented-control button.active {
+  color: #ffffff;
+  background: #1769e0;
+}
+
 .switch-button {
   width: 46px;
   height: 26px;
@@ -943,7 +1112,7 @@ h3 {
 
 .device-row {
   display: grid;
-  grid-template-columns: minmax(116px, 0.82fr) minmax(160px, 1.18fr) 32px;
+  grid-template-columns: minmax(116px, 0.82fr) minmax(142px, 1.18fr) 32px 32px;
   align-items: end;
   gap: 8px;
   padding: 10px;
@@ -978,9 +1147,8 @@ h3 {
 }
 
 .device-row .device-id-input {
-  cursor: pointer;
   color: #0b1b31;
-  background: #f8fafc;
+  background: #ffffff;
 }
 
 .device-row .device-id-input:hover {
@@ -989,9 +1157,13 @@ h3 {
 }
 
 .device-row .device-id-input:focus {
-  border-color: #d7dde7;
-  outline: 0;
-  box-shadow: none;
+  border-color: #1769e0;
+  outline: 2px solid rgba(23, 105, 224, 0.12);
+}
+
+.device-row .device-id-input.invalid {
+  border-color: #f04438;
+  background: #fff8f7;
 }
 
 .empty-devices {
@@ -1062,7 +1234,17 @@ button:disabled {
   background: #fee4e2;
 }
 
-.danger-button svg {
+.copy-device-button {
+  width: 32px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  color: #1769e0;
+  background: #e8f1ff;
+}
+
+.danger-button svg,
+.copy-device-button svg {
   width: 15px;
   height: 15px;
   fill: none;
@@ -1138,7 +1320,7 @@ pre {
 
 @media (max-width: 560px) {
   .device-row {
-    grid-template-columns: minmax(0, 1fr) 32px;
+    grid-template-columns: minmax(0, 1fr) 32px 32px;
   }
 
   .device-row label {
@@ -1147,6 +1329,10 @@ pre {
 
   .danger-button {
     grid-column: 2;
+  }
+
+  .copy-device-button {
+    grid-column: 3;
   }
 
   .section-actions {
