@@ -1,5 +1,6 @@
 use chrono::Utc;
 use regex::Regex;
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashSet, VecDeque},
@@ -36,6 +37,7 @@ const NOTIFICATION_LABEL: &str = "message-toast";
 const NOTIFICATION_WIDTH: f64 = 380.0;
 const NOTIFICATION_HEIGHT: f64 = 116.0;
 const NOTIFICATION_MARGIN: i32 = 18;
+const DEFAULT_RELAY_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -72,6 +74,47 @@ struct IncomingPayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct RelaySettings {
+    enabled: bool,
+    base_url: String,
+    secret: String,
+}
+
+impl Default for RelaySettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            base_url: String::new(),
+            secret: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RelayMessage {
+    #[serde(default)]
+    relay_id: String,
+    #[serde(default)]
+    sender: String,
+    text: String,
+    #[serde(default)]
+    code: String,
+    #[serde(rename = "id")]
+    device_id: String,
+    received_at: String,
+    remote_addr: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RelayPollResponse {
+    #[serde(default)]
+    messages: Vec<RelayMessage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct SenderDevice {
     id: String,
     name: String,
@@ -90,6 +133,10 @@ struct ReceiverStatus {
     notification_enabled: bool,
     notification_position: NotificationPosition,
     direct_paste_enabled: bool,
+    relay_enabled: bool,
+    relay_running: bool,
+    relay_base_url: String,
+    relay_secret: String,
     sender_devices: Vec<SenderDevice>,
 }
 
@@ -104,6 +151,8 @@ struct AppSettings {
     #[serde(default)]
     direct_paste_enabled: bool,
     #[serde(default)]
+    relay: RelaySettings,
+    #[serde(default)]
     sender_devices: Vec<SenderDevice>,
 }
 
@@ -115,6 +164,8 @@ struct AppState {
     notification_enabled: Mutex<bool>,
     notification_position: Mutex<NotificationPosition>,
     direct_paste_enabled: Mutex<bool>,
+    relay: Mutex<RelaySettings>,
+    relay_running: Mutex<bool>,
     sender_devices: Mutex<Vec<SenderDevice>>,
     receiver: Mutex<Option<Arc<Server>>>,
 }
@@ -161,6 +212,10 @@ fn receiver_status(state: State<'_, Arc<AppState>>) -> ReceiverStatus {
         notification_enabled: notifications_are_enabled(&state),
         notification_position: current_notification_position(&state),
         direct_paste_enabled: direct_paste_is_enabled(&state),
+        relay_enabled: current_relay_settings(&state).enabled,
+        relay_running: relay_is_running(&state),
+        relay_base_url: current_relay_settings(&state).base_url,
+        relay_secret: current_relay_settings(&state).secret,
         sender_devices: current_sender_devices(&state),
     }
 }
@@ -196,6 +251,55 @@ fn set_direct_paste_enabled(enabled: bool, state: State<'_, Arc<AppState>>) -> R
         .lock()
         .map_err(|_| "直接输入设置不可用".to_string())? = enabled;
     persist_settings(&state)
+}
+
+#[tauri::command]
+fn set_relay_settings(
+    relay: RelaySettings,
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    let state = state.inner().clone();
+    let relay = normalize_relay_settings(relay)?;
+    let enabled = relay.enabled;
+    *state
+        .relay
+        .lock()
+        .map_err(|_| "云端接入设置不可用".to_string())? = relay;
+    persist_settings(&state)?;
+
+    if enabled {
+        start_relay_client(app, state)?;
+    } else {
+        stop_relay_client(&state)?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+fn test_relay_connection(relay: RelaySettings) -> Result<(), String> {
+    let relay = normalize_relay_settings(RelaySettings {
+        enabled: true,
+        base_url: relay.base_url,
+        secret: relay.secret,
+    })?;
+    let client = Client::builder()
+        .timeout(Duration::from_secs(8))
+        .build()
+        .map_err(|error| format!("云端连接初始化失败: {}", error))?;
+    let url = format!("{}/api/verify", relay.base_url.trim_end_matches('/'));
+    let response = client
+        .get(url)
+        .bearer_auth(relay.secret)
+        .send()
+        .map_err(|error| format!("云端服务不可用: {}", error))?;
+
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        Err(format!("云端服务返回 HTTP {}", response.status()))
+    }
 }
 
 #[tauri::command]
@@ -346,12 +450,152 @@ fn direct_paste_is_enabled(state: &Arc<AppState>) -> bool {
         .unwrap_or(false)
 }
 
+fn current_relay_settings(state: &Arc<AppState>) -> RelaySettings {
+    state
+        .relay
+        .lock()
+        .map(|relay| relay.clone())
+        .unwrap_or_default()
+}
+
+fn normalize_relay_settings(relay: RelaySettings) -> Result<RelaySettings, String> {
+    let base_url = relay.base_url.trim().trim_end_matches('/').to_string();
+    let secret = relay.secret.trim().to_string();
+
+    if relay.enabled {
+        if base_url.is_empty() {
+            return Err("请填写云端服务地址".to_string());
+        }
+        if !base_url.starts_with("http://") && !base_url.starts_with("https://") {
+            return Err("云端服务地址需以 http:// 或 https:// 开头".to_string());
+        }
+        if secret.len() < 12 {
+            return Err("云端密钥至少需要 12 个字符".to_string());
+        }
+    }
+
+    Ok(RelaySettings {
+        enabled: relay.enabled,
+        base_url,
+        secret,
+    })
+}
+
+fn relay_is_running(state: &Arc<AppState>) -> bool {
+    state
+        .relay_running
+        .lock()
+        .map(|running| *running)
+        .unwrap_or(false)
+}
+
+fn set_relay_running(state: &Arc<AppState>, running: bool) -> Result<(), String> {
+    *state
+        .relay_running
+        .lock()
+        .map_err(|_| "云端接入状态不可用".to_string())? = running;
+    Ok(())
+}
+
 fn current_sender_devices(state: &Arc<AppState>) -> Vec<SenderDevice> {
     state
         .sender_devices
         .lock()
         .map(|devices| devices.clone())
         .unwrap_or_default()
+}
+
+fn start_relay_client(app: AppHandle, state: Arc<AppState>) -> Result<(), String> {
+    let relay = current_relay_settings(&state);
+    if !relay.enabled {
+        return Ok(());
+    }
+    normalize_relay_settings(relay.clone())?;
+    if relay_is_running(&state) {
+        return Ok(());
+    }
+
+    set_relay_running(&state, true)?;
+    thread::spawn(move || relay_poll_loop(app, state));
+    Ok(())
+}
+
+fn stop_relay_client(state: &Arc<AppState>) -> Result<(), String> {
+    set_relay_running(state, false)
+}
+
+fn relay_poll_loop(app: AppHandle, state: Arc<AppState>) {
+    let client = match Client::builder().timeout(Duration::from_secs(35)).build() {
+        Ok(client) => client,
+        Err(error) => {
+            let _ = set_relay_running(&state, false);
+            let _ = app.emit("receiver-error", format!("云端接入初始化失败: {}", error));
+            return;
+        }
+    };
+    let mut after = String::new();
+
+    while relay_is_running(&state) {
+        let relay = current_relay_settings(&state);
+        if !relay.enabled {
+            let _ = set_relay_running(&state, false);
+            break;
+        }
+
+        let mut poll_url = format!("{}/api/poll", relay.base_url.trim_end_matches('/'));
+        if !after.is_empty() {
+            poll_url.push_str("?after=");
+            poll_url.push_str(&url_encode_query_value(&after));
+        }
+        let request = client.get(&poll_url).bearer_auth(relay.secret);
+
+        match request.send() {
+            Ok(response) if response.status().is_success() => {
+                match response.json::<RelayPollResponse>() {
+                    Ok(payload) => {
+                        for relay_message in payload.messages {
+                            if !relay_is_running(&state) {
+                                break;
+                            }
+                            after = relay_message.received_at.clone();
+                            if let Some(message) = message_from_relay(relay_message, &state) {
+                                store_message(&app, &state, message);
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        let _ = app.emit("receiver-error", format!("云端消息解析失败: {}", error));
+                        thread::sleep(DEFAULT_RELAY_POLL_INTERVAL);
+                    }
+                }
+            }
+            Ok(response) => {
+                let _ = app.emit(
+                    "receiver-error",
+                    format!("云端接入失败: HTTP {}", response.status()),
+                );
+                thread::sleep(DEFAULT_RELAY_POLL_INTERVAL);
+            }
+            Err(error) => {
+                if relay_is_running(&state) {
+                    let _ = app.emit("receiver-error", format!("云端接入连接失败: {}", error));
+                    thread::sleep(DEFAULT_RELAY_POLL_INTERVAL);
+                }
+            }
+        }
+    }
+}
+
+fn url_encode_query_value(value: &str) -> String {
+    value
+        .bytes()
+        .flat_map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                vec![byte as char]
+            }
+            _ => format!("%{:02X}", byte).chars().collect(),
+        })
+        .collect()
 }
 
 fn normalize_sender_devices(devices: Vec<SenderDevice>) -> Vec<SenderDevice> {
@@ -503,6 +747,21 @@ fn handle_request(mut request: tiny_http::Request, app: &AppHandle, state: &Arc<
         return;
     }
 
+    let message = message_from_payload(payload, origin, state);
+    match message {
+        Ok(message) => {
+            store_message(app, state, message);
+            respond(request, StatusCode(200), r#"{"ok":true}"#);
+        }
+        Err((status, body)) => respond(request, status, body),
+    }
+}
+
+fn message_from_payload(
+    payload: IncomingPayload,
+    origin: String,
+    state: &Arc<AppState>,
+) -> Result<IncomingMessage, (StatusCode, &'static str)> {
     let text = payload
         .text
         .or(payload.message)
@@ -518,12 +777,7 @@ fn handle_request(mut request: tiny_http::Request, app: &AppHandle, state: &Arc<
             .trim()
             .is_empty()
     {
-        respond(
-            request,
-            StatusCode(400),
-            r#"{"ok":false,"error":"empty_message"}"#,
-        );
-        return;
+        return Err((StatusCode(400), r#"{"ok":false,"error":"empty_message"}"#));
     }
 
     let code = payload
@@ -533,7 +787,7 @@ fn handle_request(mut request: tiny_http::Request, app: &AppHandle, state: &Arc<
     let copied_text = code.clone().unwrap_or_else(|| text.clone());
 
     let id_for_sender = payload.device_id.clone();
-    let message = IncomingMessage {
+    Ok(IncomingMessage {
         id: Uuid::new_v4().to_string(),
         sender: resolve_sender(payload.sender, id_for_sender.as_deref(), state),
         text,
@@ -541,10 +795,48 @@ fn handle_request(mut request: tiny_http::Request, app: &AppHandle, state: &Arc<
         copied_text,
         received_at: Utc::now().to_rfc3339(),
         remote_addr: origin,
+    })
+}
+
+fn message_from_relay(
+    relay_message: RelayMessage,
+    state: &Arc<AppState>,
+) -> Option<IncomingMessage> {
+    let device_id = relay_message.device_id.trim().to_string();
+    if sender_for_device_id(&device_id, state).is_none() {
+        return None;
+    }
+
+    let text = relay_message.text.trim().to_string();
+    let code = normalize_code(&relay_message.code).or_else(|| extract_code(&text));
+    let copied_text = code.clone().unwrap_or_else(|| text.clone());
+    let received_at = if relay_message.received_at.trim().is_empty() {
+        Utc::now().to_rfc3339()
+    } else {
+        relay_message.received_at
     };
 
+    Some(IncomingMessage {
+        id: if relay_message.relay_id.trim().is_empty() {
+            Uuid::new_v4().to_string()
+        } else {
+            relay_message.relay_id
+        },
+        sender: resolve_sender(Some(relay_message.sender), Some(device_id.as_str()), state),
+        text,
+        code,
+        copied_text,
+        received_at,
+        remote_addr: relay_message.remote_addr,
+    })
+}
+
+fn store_message(app: &AppHandle, state: &Arc<AppState>, message: IncomingMessage) {
     {
         let mut messages = state.messages.lock().expect("message state poisoned");
+        if messages.iter().any(|existing| existing.id == message.id) {
+            return;
+        }
         messages.push_front(message.clone());
         while messages.len() > MAX_MESSAGES {
             messages.pop_back();
@@ -558,7 +850,6 @@ fn handle_request(mut request: tiny_http::Request, app: &AppHandle, state: &Arc<
         show_message_notification(app, &message, current_notification_position(state));
     }
     let _ = app.emit("message-received", message);
-    respond(request, StatusCode(200), r#"{"ok":true}"#);
 }
 
 fn show_message_notification(
@@ -652,9 +943,7 @@ fn position_notification_window(
             }
             NotificationPosition::TopRight
             | NotificationPosition::TopLeft
-            | NotificationPosition::TopCenter => {
-                work_area.position.y + NOTIFICATION_MARGIN
-            }
+            | NotificationPosition::TopCenter => work_area.position.y + NOTIFICATION_MARGIN,
         };
         window.set_position(PhysicalPosition::new(x, y))?;
     }
@@ -681,6 +970,7 @@ fn load_settings(path: PathBuf) -> AppSettings {
             notification_enabled: default_notification_enabled(),
             notification_position: default_notification_position(),
             direct_paste_enabled: false,
+            relay: RelaySettings::default(),
             sender_devices: vec![default_sender_device()],
         })
 }
@@ -691,6 +981,7 @@ fn persist_settings(state: &Arc<AppState>) -> Result<(), String> {
         notification_enabled: notifications_are_enabled(state),
         notification_position: current_notification_position(state),
         direct_paste_enabled: direct_paste_is_enabled(state),
+        relay: current_relay_settings(state),
         sender_devices: current_sender_devices(state),
     };
 
@@ -895,6 +1186,8 @@ pub fn run() {
                 notification_enabled: Mutex::new(settings.notification_enabled),
                 notification_position: Mutex::new(settings.notification_position),
                 direct_paste_enabled: Mutex::new(settings.direct_paste_enabled),
+                relay: Mutex::new(settings.relay),
+                relay_running: Mutex::new(false),
                 sender_devices: Mutex::new(sender_devices),
                 receiver: Mutex::new(None),
             });
@@ -919,6 +1212,11 @@ pub fn run() {
             if let Err(error) = start_receiver(app.handle().clone(), state.clone()) {
                 let _ = app.emit("receiver-error", error);
             }
+            if current_relay_settings(&state).enabled {
+                if let Err(error) = start_relay_client(app.handle().clone(), state.clone()) {
+                    let _ = app.emit("receiver-error", error);
+                }
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -928,6 +1226,8 @@ pub fn run() {
             set_notification_enabled,
             set_notification_position,
             set_direct_paste_enabled,
+            set_relay_settings,
+            test_relay_connection,
             set_sender_devices,
             set_receiver_port,
             type_verification_code,

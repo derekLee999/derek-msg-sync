@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { computed, onMounted, onUnmounted, shallowRef } from 'vue'
-import type { IncomingMessage, NotificationPosition, ReceiverStatus, SenderDevice } from '../types'
+import type { IncomingMessage, NotificationPosition, ReceiverStatus, RelaySettings, SenderDevice } from '../types'
 
 const MAX_VISIBLE_MESSAGES = 100
 
@@ -125,6 +125,27 @@ export function useMessages() {
     }
   }
 
+  async function setRelaySettings(relay: RelaySettings) {
+    error.value = ''
+    try {
+      await invoke('set_relay_settings', { relay })
+      await refreshStatus()
+    } catch (cause) {
+      error.value = String(cause)
+      throw cause
+    }
+  }
+
+  async function testRelayConnection(relay: RelaySettings) {
+    error.value = ''
+    try {
+      await invoke('test_relay_connection', { relay })
+    } catch (cause) {
+      error.value = String(cause)
+      throw cause
+    }
+  }
+
   async function refreshStatus() {
     status.value = await invoke<ReceiverStatus>('receiver_status')
     senderDevices.value = cloneSenderDevices(status.value.senderDevices)
@@ -154,6 +175,7 @@ export function useMessages() {
     await refresh()
 
     stopMessageListener = await listen<IncomingMessage>('message-received', (event) => {
+      error.value = ''
       messages.value = [event.payload, ...messages.value].slice(0, MAX_VISIBLE_MESSAGES)
       writeText(event.payload.copiedText)
         .then(() => {
@@ -205,7 +227,9 @@ export function useMessages() {
     setDirectPasteEnabled,
     setNotificationEnabled,
     setNotificationPosition,
+    setRelaySettings,
     setSenderDevices,
+    testRelayConnection,
     toggleReceiver,
   }
 }

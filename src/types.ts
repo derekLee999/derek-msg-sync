@@ -17,6 +17,10 @@ export interface ReceiverStatus {
   notificationEnabled: boolean
   notificationPosition: NotificationPosition
   directPasteEnabled: boolean
+  relayEnabled: boolean
+  relayRunning: boolean
+  relayBaseUrl: string
+  relaySecret: string
   senderDevices: SenderDevice[]
 }
 
@@ -26,4 +30,10 @@ export interface SenderDevice {
   id: string
   name: string
   deviceId: string
+}
+
+export interface RelaySettings {
+  enabled: boolean
+  baseUrl: string
+  secret: string
 }

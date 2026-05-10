@@ -28,7 +28,9 @@ const {
   setDirectPasteEnabled,
   setNotificationEnabled,
   setNotificationPosition,
+  setRelaySettings,
   setSenderDevices,
+  testRelayConnection,
   toggleReceiver,
 } = useMessages()
 
@@ -171,6 +173,24 @@ async function handleSenderDevicesChange(devices: typeof senderDevices.value) {
     showToast('设备更新失败')
   }
 }
+
+async function handleRelaySettingsChange(relay: { enabled: boolean; baseUrl: string; secret: string }) {
+  try {
+    await setRelaySettings(relay)
+    showToast(relay.enabled ? '云端接入已开启' : '云端接入已关闭')
+  } catch {
+    showToast('云端接入设置失败')
+  }
+}
+
+async function handleRelayConnectionTest(relay: { enabled: boolean; baseUrl: string; secret: string }) {
+  try {
+    await testRelayConnection(relay)
+    showToast('云端服务连接正常')
+  } catch {
+    showToast('云端服务连接失败')
+  }
+}
 </script>
 
 <template>
@@ -250,11 +270,17 @@ async function handleSenderDevicesChange(devices: typeof senderDevices.value) {
             :notification-enabled="status?.notificationEnabled ?? true"
             :notification-position="status?.notificationPosition ?? 'bottomRight'"
             :direct-paste-enabled="status?.directPasteEnabled ?? false"
+            :relay-enabled="status?.relayEnabled ?? false"
+            :relay-running="status?.relayRunning ?? false"
+            :relay-base-url="status?.relayBaseUrl ?? ''"
+            :relay-secret="status?.relaySecret ?? ''"
             :port="status?.port ?? 17866"
             @update-sender-devices="handleSenderDevicesChange"
             @set-notification-enabled="handleNotificationChange"
             @set-notification-position="handleNotificationPositionChange"
             @set-direct-paste-enabled="handleDirectPasteChange"
+            @set-relay-settings="handleRelaySettingsChange"
+            @test-relay-connection="handleRelayConnectionTest"
             @show-toast="showToast"
             @request-port-change="requestPortChange"
           />

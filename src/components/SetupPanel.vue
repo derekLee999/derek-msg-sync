@@ -3,7 +3,7 @@ import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart'
 import { computed, onMounted, shallowRef, watch } from 'vue'
-import type { NotificationPosition, SenderDevice } from '../types'
+import type { NotificationPosition, RelaySettings, SenderDevice } from '../types'
 
 const MAX_SENDER_DEVICES = 5
 const SHORTCUT_EXAMPLE_URL = 'https://www.icloud.com/shortcuts/d02d0af4323b403d8c4269019bb6f11f'
@@ -21,6 +21,10 @@ const props = defineProps<{
   notificationEnabled: boolean
   notificationPosition: NotificationPosition
   directPasteEnabled: boolean
+  relayEnabled: boolean
+  relayRunning: boolean
+  relayBaseUrl: string
+  relaySecret: string
   port: number
 }>()
 
@@ -28,17 +32,23 @@ const emit = defineEmits<{
   setNotificationEnabled: [enabled: boolean]
   setNotificationPosition: [position: NotificationPosition]
   setDirectPasteEnabled: [enabled: boolean]
+  setRelaySettings: [relay: RelaySettings]
+  testRelayConnection: [relay: RelaySettings]
   showToast: [text: string]
   updateSenderDevices: [devices: SenderDevice[]]
   requestPortChange: [port: number]
 }>()
 
 type CopiedTarget = '' | 'endpoint' | 'json' | 'curl'
+type RelayCopiedTarget = '' | 'endpoint' | 'json' | 'curl'
 
 const copied = shallowRef<CopiedTarget>('')
+const relayCopied = shallowRef<RelayCopiedTarget>('')
 const autostartEnabled = shallowRef(false)
 const autostartBusy = shallowRef(false)
 const portInput = shallowRef(String(props.port))
+const relayBaseUrlInput = shallowRef(props.relayBaseUrl)
+const relaySecretInput = shallowRef(props.relaySecret)
 
 const parsedPort = computed(() => Number.parseInt(portInput.value, 10))
 const portInvalid = computed(() => {
@@ -86,11 +96,56 @@ const curlCommand = computed(() => {
 
   return `curl.exe -X POST '${endpoint}' -H 'Content-Type: application/json' -d '${payload}'`
 })
+const relayEndpoint = computed(() => {
+  const baseUrl = relayBaseUrlInput.value.trim().replace(/\/+$/, '')
+  return baseUrl ? `${baseUrl}/api/messages` : 'http://服务器公网IP:18080/api/messages'
+})
+const relayPayload = computed(() => ({
+  text: '您的验证码是 123456，5 分钟内有效',
+  id: firstDevice.value?.deviceId.trim() || '自动生成',
+  secret: relaySecretInput.value.trim() || '你的云端密钥',
+}))
+const relayJson = computed(() => JSON.stringify(relayPayload.value, null, 2))
+const relayCurlCommand = computed(() => {
+  const endpoint = escapePowerShellSingleQuoted(relayEndpoint.value)
+  const payload = escapePowerShellSingleQuoted(JSON.stringify(relayPayload.value))
+
+  return `curl.exe -X POST '${endpoint}' -H 'Content-Type: application/json' -d '${payload}'`
+})
+const relayCopiedTip = computed(() => {
+  const messages: Record<Exclude<RelayCopiedTarget, ''>, string> = {
+    endpoint: '云端接收地址已复制',
+    json: '云端 JSON 示例已复制',
+    curl: '云端 curl 请求已复制',
+  }
+
+  return relayCopied.value ? messages[relayCopied.value] : ''
+})
+const relayInvalid = computed(() => {
+  const baseUrl = relayBaseUrlInput.value.trim()
+  if (!baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) {
+    return true
+  }
+
+  return relaySecretInput.value.trim().length < 12
+})
 
 watch(
   () => props.port,
   (port) => {
     portInput.value = String(port)
+  },
+)
+watch(
+  () => props.relayBaseUrl,
+  (baseUrl) => {
+    relayBaseUrlInput.value = baseUrl
+  },
+)
+watch(
+  () => props.relaySecret,
+  (secret) => {
+    relaySecretInput.value = secret
   },
 )
 
@@ -107,6 +162,21 @@ async function copyJson() {
 async function copyCurl() {
   await writeText(curlCommand.value)
   copied.value = 'curl'
+}
+
+async function copyRelayEndpoint() {
+  await writeText(relayEndpoint.value)
+  relayCopied.value = 'endpoint'
+}
+
+async function copyRelayJson() {
+  await writeText(relayJson.value)
+  relayCopied.value = 'json'
+}
+
+async function copyRelayCurl() {
+  await writeText(relayCurlCommand.value)
+  relayCopied.value = 'curl'
 }
 
 function escapePowerShellSingleQuoted(value: string) {
@@ -157,6 +227,22 @@ function submitPortChange() {
   }
 
   emit('requestPortChange', parsedPort.value)
+}
+
+function submitRelaySettings(enabled = props.relayEnabled) {
+  emit('setRelaySettings', {
+    enabled,
+    baseUrl: relayBaseUrlInput.value,
+    secret: relaySecretInput.value,
+  })
+}
+
+function testRelayConnection() {
+  emit('testRelayConnection', {
+    enabled: true,
+    baseUrl: relayBaseUrlInput.value,
+    secret: relaySecretInput.value,
+  })
 }
 
 function addSenderDevice() {
@@ -336,6 +422,84 @@ onMounted(() => {
       </label>
     </section>
 
+    <section class="settings-section relay-section">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">非局域网接收</p>
+          <h2>云端接入</h2>
+        </div>
+        <span :class="['relay-status', { active: relayRunning }]">
+          {{ relayRunning ? '已连接' : '未连接' }}
+        </span>
+      </div>
+
+      <div class="shortcut-notice">
+        <div>
+          <b>需要先部署 derek-relay</b>
+          <span>iPhone 发送到云服务器，Windows 会主动连接云端接收消息。没有域名时可直接填写服务器公网 IP。</span>
+        </div>
+      </div>
+
+      <label class="field">
+        <span>云端服务地址</span>
+        <div class="control-row">
+          <input
+            v-model="relayBaseUrlInput"
+            placeholder="http://服务器公网IP:18080"
+            spellcheck="false"
+          />
+          <button type="button" class="icon-button" title="复制云端接收地址" @click="copyRelayEndpoint">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M8 8h10v10H8z" />
+              <path d="M6 14H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v1" />
+            </svg>
+          </button>
+        </div>
+        <small class="field-hint">示例： http://1.2.3.4:18080，快捷指令实际请求 /api/messages</small>
+      </label>
+
+      <label class="field">
+        <span>云端密钥</span>
+        <div class="control-row">
+          <input
+            v-model="relaySecretInput"
+            type="password"
+            placeholder="与 derek-relay 的 RELAY_SECRET 保持一致"
+            spellcheck="false"
+          />
+          <button
+            type="button"
+            class="text-button"
+            :disabled="relayInvalid"
+            @click="submitRelaySettings(true)"
+          >
+            保存并开启
+          </button>
+        </div>
+        <small v-if="relayInvalid" class="field-hint error">地址需以 http:// 或 https:// 开头，密钥至少 12 个字符</small>
+        <small v-else class="field-hint">关闭后不会影响局域网接收服务</small>
+      </label>
+
+      <div class="section-actions">
+        <button
+          type="button"
+          class="small-button"
+          :disabled="relayInvalid"
+          @click="testRelayConnection"
+        >
+          测试连接
+        </button>
+        <button
+          type="button"
+          class="small-button"
+          :disabled="!relayEnabled"
+          @click="submitRelaySettings(false)"
+        >
+          关闭云端接入
+        </button>
+      </div>
+    </section>
+
     <section class="settings-section">
       <div class="section-head compact">
         <h3>设备识别</h3>
@@ -411,6 +575,28 @@ onMounted(() => {
       <pre>{{ exampleJson }}</pre>
     </section>
 
+    <section class="settings-section">
+      <div class="shortcut-title">
+        <span>云端 POST 示例</span>
+        <div class="shortcut-actions">
+          <button type="button" class="icon-button quiet" title="复制云端 JSON 示例" @click="copyRelayJson">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M8 8h10v10H8z" />
+              <path d="M6 14H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v1" />
+            </svg>
+          </button>
+          <button type="button" class="icon-button quiet" title="复制云端 curl 请求" @click="copyRelayCurl">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m4 7 5 5-5 5" />
+              <path d="M12 17h8" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <small class="field-hint">{{ relayEndpoint }}</small>
+      <pre>{{ relayJson }}</pre>
+    </section>
+
     <section class="steps">
       <div class="step">
         <b>1</b>
@@ -426,7 +612,7 @@ onMounted(() => {
       </div>
     </section>
 
-    <p v-if="copiedTip" class="copied-tip">{{ copiedTip }}</p>
+    <p v-if="copiedTip || relayCopiedTip" class="copied-tip">{{ copiedTip || relayCopiedTip }}</p>
   </aside>
 </template>
 
@@ -452,6 +638,10 @@ onMounted(() => {
 
 .autostart-section {
   background: #f6f9ff;
+}
+
+.relay-section {
+  background: #f8fbff;
 }
 
 .section-head,
@@ -500,6 +690,23 @@ h3 {
   color: #0b7a56;
   background: #dff8ed;
   font-size: 12px;
+}
+
+.relay-status {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border: 1px solid #d7dde7;
+  border-radius: 999px;
+  color: #667085;
+  background: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.relay-status.active {
+  border-color: #9ee4c4;
+  color: #0b7a56;
+  background: #e5fbf0;
 }
 
 .field {
