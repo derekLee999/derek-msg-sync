@@ -33,14 +33,13 @@ jobs:
       - name: Rename artifacts for release
         shell: pwsh
         run: |
-          $version = "${{ github.ref_name }}" -replace '^v', ''
           Get-ChildItem src-tauri/target/release/bundle/msi/*.msi | ForEach-Object {
-            $new = "derek-msg-sync_$version" + $_.Name.Substring($_.Name.IndexOf('_'))
+            $new = "derek-msg-sync" + $_.Name.Substring($_.Name.IndexOf('_'))
             Rename-Item $_.FullName $new
             Write-Host "Renamed: $($_.Name) -> $new"
           }
           Get-ChildItem src-tauri/target/release/bundle/nsis/*Setup.exe | ForEach-Object {
-            $new = "derek-msg-sync_$version" + $_.Name.Substring($_.Name.IndexOf('_'))
+            $new = "derek-msg-sync" + $_.Name.Substring($_.Name.IndexOf('_'))
             Rename-Item $_.FullName $new
             Write-Host "Renamed: $($_.Name) -> $new"
           }
