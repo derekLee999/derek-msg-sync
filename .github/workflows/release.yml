@@ -48,7 +48,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: derek-msg-sync v${{ github.ref_name }}
+          name: derek-msg-sync ${{ github.ref_name }}
           body: |
             ## 更新内容
             - 版本升级至 ${{ github.ref_name }}
