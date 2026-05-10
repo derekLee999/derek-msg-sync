@@ -91,7 +91,6 @@ impl Default for RelaySettings {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct RelayMessage {
     #[serde(default)]
     relay_id: String,
