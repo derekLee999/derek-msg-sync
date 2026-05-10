@@ -1,4 +1,4 @@
-use chrono::Utc;
+use chrono::{FixedOffset, Utc};
 use regex::Regex;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
@@ -39,6 +39,7 @@ const NOTIFICATION_WIDTH: f64 = 380.0;
 const NOTIFICATION_HEIGHT: f64 = 116.0;
 const NOTIFICATION_MARGIN: i32 = 18;
 const DEFAULT_RELAY_POLL_INTERVAL: Duration = Duration::from_secs(2);
+const RELAY_ERROR_REPORT_THRESHOLD: u32 = 3;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -100,6 +101,7 @@ impl Default for RelaySettings {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct RelayMessage {
     #[serde(default)]
     relay_id: String,
@@ -184,7 +186,7 @@ struct AppState {
 
 fn write_log(state: &Arc<AppState>, tag: &str, msg: &str) {
     let _guard = state.log_lock.lock().ok();
-    let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S%.3f").to_string();
+    let timestamp = beijing_now().format("%Y-%m-%d %H:%M:%S%.3f").to_string();
     let line = format!("[{}] [{}] {}\n", timestamp, tag, msg);
     rotate_log_if_needed(&state.log_path, line.len() as u64);
     if let Ok(mut file) = fs::OpenOptions::new()
@@ -194,6 +196,10 @@ fn write_log(state: &Arc<AppState>, tag: &str, msg: &str) {
     {
         let _ = file.write_all(line.as_bytes());
     }
+}
+
+fn beijing_now() -> chrono::DateTime<FixedOffset> {
+    Utc::now().with_timezone(&FixedOffset::east_opt(8 * 3600).expect("valid Beijing offset"))
 }
 
 fn rotate_log_if_needed(log_path: &PathBuf, next_line_bytes: u64) {
@@ -596,6 +602,7 @@ fn relay_poll_loop(app: AppHandle, state: Arc<AppState>) {
         }
     };
     let mut after = String::new();
+    let mut consecutive_errors = 0_u32;
 
     while relay_is_running(&state) {
         let relay = current_relay_settings(&state);
@@ -625,6 +632,7 @@ fn relay_poll_loop(app: AppHandle, state: Arc<AppState>) {
                                 &body[..body.len().min(500)]));
                             match serde_json::from_str::<RelayPollResponse>(&body) {
                                 Ok(payload) => {
+                                    consecutive_errors = 0;
                                     write_log(&state, "BACKEND", &format!(
                                         "解析成功, 消息数: {}", payload.messages.len()));
                                     for relay_message in payload.messages {
@@ -650,38 +658,64 @@ fn relay_poll_loop(app: AppHandle, state: Arc<AppState>) {
                                     }
                                 }
                                 Err(error) => {
+                                    consecutive_errors += 1;
                                     write_log(&state, "BACKEND", &format!(
-                                        "JSON解析失败: {} | 原始响应体: {}", error, body));
-                                    let _ = app.emit("receiver-error", format!("云端消息解析失败: {}", error));
+                                        "JSON解析失败(连续{}次): {} | 原始响应体: {}", consecutive_errors, error, body));
+                                    emit_relay_error_if_needed(
+                                        &app,
+                                        consecutive_errors,
+                                        format!("云端消息解析失败: {}", error),
+                                    );
                                     thread::sleep(DEFAULT_RELAY_POLL_INTERVAL);
                                 }
                             }
                         }
                         Err(error) => {
-                            write_log(&state, "BACKEND", &format!("读取响应体失败: {}", error));
-                            let _ = app.emit("receiver-error", format!("云端消息解析失败: {}", error));
+                            consecutive_errors += 1;
+                            write_log(&state, "BACKEND", &format!(
+                                "读取响应体失败(连续{}次): {}", consecutive_errors, error));
+                            emit_relay_error_if_needed(
+                                &app,
+                                consecutive_errors,
+                                format!("云端消息解析失败: {}", error),
+                            );
                             thread::sleep(DEFAULT_RELAY_POLL_INTERVAL);
                         }
                     }
                 } else {
-                    write_log(&state, "BACKEND", &format!("HTTP错误: {}", status.as_u16()));
-                    let _ = app.emit(
-                        "receiver-error",
+                    consecutive_errors += 1;
+                    write_log(&state, "BACKEND", &format!(
+                        "HTTP错误(连续{}次): {}", consecutive_errors, status.as_u16()));
+                    emit_relay_error_if_needed(
+                        &app,
+                        consecutive_errors,
                         format!("云端接入失败: HTTP {}", status.as_u16()),
                     );
                     thread::sleep(DEFAULT_RELAY_POLL_INTERVAL);
                 }
             }
             Err(error) => {
-                write_log(&state, "BACKEND", &format!("网络请求失败: {}", error));
+                consecutive_errors += 1;
+                write_log(&state, "BACKEND", &format!(
+                    "网络请求失败(连续{}次): {}", consecutive_errors, error));
                 if relay_is_running(&state) {
-                    let _ = app.emit("receiver-error", format!("云端接入连接失败: {}", error));
+                    emit_relay_error_if_needed(
+                        &app,
+                        consecutive_errors,
+                        format!("云端接入连接失败: {}", error),
+                    );
                     thread::sleep(DEFAULT_RELAY_POLL_INTERVAL);
                 }
             }
         }
     }
     write_log(&state, "BACKEND", "云端轮询线程退出");
+}
+
+fn emit_relay_error_if_needed(app: &AppHandle, consecutive_errors: u32, message: String) {
+    if consecutive_errors >= RELAY_ERROR_REPORT_THRESHOLD {
+        let _ = app.emit("receiver-error", message);
+    }
 }
 
 fn url_encode_query_value(value: &str) -> String {
@@ -1376,5 +1410,36 @@ fn show_main_window(app: &AppHandle) {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn relay_poll_response_accepts_camel_case_message_fields() {
+        let json = r#"{
+            "messages": [
+                {
+                    "relayId": "relay-1",
+                    "sender": "iPhone",
+                    "text": "您的验证码是 215164，5 分钟内有效",
+                    "code": "215164",
+                    "id": "1234567",
+                    "receivedAt": "2026-05-10T17:17:50.821834468Z",
+                    "remoteAddr": "74.48.90.147"
+                }
+            ]
+        }"#;
+
+        let payload: RelayPollResponse =
+            serde_json::from_str(json).expect("relay poll payload should parse");
+
+        assert_eq!(payload.messages.len(), 1);
+        let message = &payload.messages[0];
+        assert_eq!(message.relay_id, "relay-1");
+        assert_eq!(message.received_at, "2026-05-10T17:17:50.821834468Z");
+        assert_eq!(message.remote_addr, "74.48.90.147");
     }
 }
