@@ -27,14 +27,33 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Build and release
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build
+        run: npx tauri build --bundles msi,nsis
+
+      - name: Rename artifacts for release
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^v', ''
+          Get-ChildItem src-tauri/target/release/bundle/msi/*.msi | ForEach-Object {
+            $new = "derek-msg-sync_$version" + $_.Name.Substring($_.Name.IndexOf('_'))
+            Rename-Item $_.FullName $new
+            Write-Host "Renamed: $($_.Name) -> $new"
+          }
+          Get-ChildItem src-tauri/target/release/bundle/nsis/*Setup.exe | ForEach-Object {
+            $new = "derek-msg-sync_$version" + $_.Name.Substring($_.Name.IndexOf('_'))
+            Rename-Item $_.FullName $new
+            Write-Host "Renamed: $($_.Name) -> $new"
+          }
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'derek-msg-sync v__VERSION__'
-          releaseBody: |
+          tag_name: ${{ github.ref_name }}
+          name: derek-msg-sync v${{ github.ref_name }}
+          body: |
             ## 更新内容
-            - 版本升级至 __VERSION__
-          releaseDraft: true
+            - 版本升级至 ${{ github.ref_name }}
+          draft: true
+          files: |
+            src-tauri/target/release/bundle/msi/derek-msg-sync_*.msi
+            src-tauri/target/release/bundle/nsis/derek-msg-sync_*Setup.exe
