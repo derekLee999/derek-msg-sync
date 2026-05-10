@@ -26,6 +26,7 @@ const props = defineProps<{
   notificationMode: NotificationMode
   notificationPosition: NotificationPosition
   directPasteEnabled: boolean
+  isMacos: boolean
   relayEnabled: boolean
   relayRunning: boolean
   relayBaseUrl: string
@@ -418,7 +419,7 @@ onMounted(() => {
       <div class="setting-row">
         <div>
           <span>开机自启</span>
-          <small>登录 Windows 后自动启动接收器</small>
+          <small>登录 {{ isMacos ? 'macOS' : 'Windows' }} 后自动启动接收器</small>
         </div>
         <button
           type="button"
@@ -448,7 +449,7 @@ onMounted(() => {
           </button>
         </div>
       </div>
-      <div v-if="notificationMode !== 'off'" class="notification-position-row">
+      <div v-if="notificationMode !== 'off' && !isMacos" class="notification-position-row">
         <span>通知位置</span>
         <div class="segmented-control" role="group" aria-label="通知显示位置">
           <button
@@ -462,7 +463,10 @@ onMounted(() => {
           </button>
         </div>
       </div>
-      <div class="setting-row">
+      <p v-else-if="notificationMode !== 'off' && isMacos" class="macos-notification-hint">
+        macOS 上通知浮窗固定显示在右上角。
+      </p>
+      <div v-if="!isMacos" class="setting-row">
         <div>
           <span>直接输入</span>
           <small>收到验证码后复制到剪贴板，并向当前光标位置逐个字符输入验证码</small>
@@ -997,6 +1001,13 @@ h3 {
   flex: 0 0 auto;
   color: #465160;
   font-size: 13px;
+}
+
+.macos-notification-hint {
+  margin: -2px 0 0;
+  color: #667085;
+  font-size: 12px;
+  line-height: 18px;
 }
 
 .segmented-control {

@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { shallowRef } from 'vue'
+import { computed, onMounted, onUnmounted, shallowRef } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import AppConfirmDialog from './components/AppConfirmDialog.vue'
 import AppToast from './components/AppToast.vue'
@@ -8,7 +10,7 @@ import SetupPanel from './components/SetupPanel.vue'
 import StatusBar from './components/StatusBar.vue'
 import { useMessages } from './composables/useMessages'
 import { useToast } from './composables/useToast'
-import type { NotificationMode, NotificationPosition } from './types'
+import type { NotificationMode, NotificationPosition, PlatformInfo } from './types'
 
 const {
   visibleMessages,
@@ -41,10 +43,13 @@ const {
 const { toastItems, showToast } = useToast()
 const setupOpen = shallowRef(false)
 const alwaysOnTop = shallowRef(false)
+const platform = shallowRef<PlatformInfo | null>(null)
 const activeConfirm = shallowRef<'stopReceiver' | 'clearMessages' | 'restartPort' | null>(null)
 const pendingPort = shallowRef<number | null>(null)
 const appWindow = getCurrentWindow()
 let resolveStopConfirm: ((confirmed: boolean) => void) | null = null
+let unlistenOpenSettings: UnlistenFn | null = null
+const isMacos = computed(() => platform.value?.isMacos ?? false)
 
 async function startDrag(event: MouseEvent) {
   if ((event.target as HTMLElement).closest('button')) {
@@ -65,6 +70,11 @@ async function minimizeWindow() {
 
 async function hideWindow() {
   await appWindow.hide()
+}
+
+async function loadPlatform() {
+  platform.value = await invoke<PlatformInfo>('platform_info')
+  document.body.classList.toggle('macos', platform.value.isMacos)
 }
 
 async function handleCopyLocalIp() {
@@ -200,12 +210,24 @@ async function handleRelayConnectionTest(relay: { enabled: boolean; baseUrl: str
     showToast('云端服务连接失败')
   }
 }
+
+onMounted(async () => {
+  await loadPlatform()
+  unlistenOpenSettings = await listen('open-settings', () => {
+    setupOpen.value = true
+  })
+})
+
+onUnmounted(() => {
+  unlistenOpenSettings?.()
+  document.body.classList.remove('macos')
+})
 </script>
 
 <template>
   <div class="window-frame">
-    <header class="titlebar" @mousedown="startDrag">
-      <div class="titlebar-title">
+    <header :class="['titlebar', { macos: isMacos }]" @mousedown="startDrag">
+      <div v-if="!isMacos" class="titlebar-title">
         <img class="titlebar-app-icon" src="/app-icon.png" alt="" aria-hidden="true" />
         <span>验证码接收器</span>
         <button type="button" class="titlebar-icon" title="接入设置" @click="setupOpen = true">
@@ -215,7 +237,7 @@ async function handleRelayConnectionTest(relay: { enabled: boolean; baseUrl: str
           </svg>
         </button>
       </div>
-      <div class="window-controls">
+      <div v-if="!isMacos" class="window-controls">
         <button
           type="button"
           :class="['titlebar-icon', { active: alwaysOnTop }]"
@@ -289,6 +311,7 @@ async function handleRelayConnectionTest(relay: { enabled: boolean; baseUrl: str
             :notification-mode="status?.notificationMode ?? 'verification'"
             :notification-position="status?.notificationPosition ?? 'bottomRight'"
             :direct-paste-enabled="status?.directPasteEnabled ?? false"
+            :is-macos="isMacos"
             :relay-enabled="status?.relayEnabled ?? false"
             :relay-running="status?.relayRunning ?? false"
             :relay-base-url="status?.relayBaseUrl ?? ''"
@@ -352,6 +375,10 @@ async function handleRelayConnectionTest(relay: { enabled: boolean; baseUrl: str
   background: #eef3f8;
 }
 
+body.macos .window-frame {
+  grid-template-rows: 52px minmax(0, 1fr);
+}
+
 .titlebar {
   display: flex;
   align-items: center;
@@ -361,6 +388,15 @@ async function handleRelayConnectionTest(relay: { enabled: boolean; baseUrl: str
   border-bottom: 1px solid rgba(28, 39, 54, 0.08);
   background: rgba(245, 248, 252, 0.92);
   user-select: none;
+}
+
+.titlebar.macos {
+  -webkit-app-region: drag;
+  justify-content: flex-start;
+  padding: 0 16px 0 82px;
+  border-bottom-color: rgba(28, 39, 54, 0.07);
+  background: rgba(248, 250, 252, 0.82);
+  backdrop-filter: blur(18px);
 }
 
 .titlebar-title,

@@ -12,6 +12,10 @@ use std::{
     thread,
     time::Duration,
 };
+#[cfg(target_os = "macos")]
+use tauri::menu::Submenu;
+#[cfg(target_os = "macos")]
+use tauri::TitleBarStyle;
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
@@ -21,6 +25,7 @@ use tauri::{
 };
 use tiny_http::{Header, Method, Response, Server, StatusCode};
 use uuid::Uuid;
+#[cfg(target_os = "windows")]
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
     KEYEVENTF_UNICODE, VIRTUAL_KEY,
@@ -34,6 +39,7 @@ const MAX_SENDER_DEVICES: usize = 5;
 const MAX_MESSAGES: usize = 100;
 const MAX_LOG_FILE_BYTES: u64 = 5 * 1024 * 1024;
 const TRAY_EXIT_ID: &str = "quit";
+const MENU_SETTINGS_ID: &str = "open-settings";
 const NOTIFICATION_LABEL: &str = "message-toast";
 const NOTIFICATION_WIDTH: f64 = 380.0;
 const NOTIFICATION_HEIGHT: f64 = 116.0;
@@ -121,6 +127,14 @@ struct RelayMessage {
 struct RelayPollResponse {
     #[serde(default)]
     messages: Vec<RelayMessage>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlatformInfo {
+    os: &'static str,
+    is_macos: bool,
+    is_windows: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -272,7 +286,24 @@ fn receiver_status(state: State<'_, Arc<AppState>>) -> ReceiverStatus {
 }
 
 #[tauri::command]
-fn set_notification_mode(mode: NotificationMode, state: State<'_, Arc<AppState>>) -> Result<(), String> {
+fn platform_info() -> PlatformInfo {
+    PlatformInfo {
+        os: std::env::consts::OS,
+        is_macos: cfg!(target_os = "macos"),
+        is_windows: cfg!(target_os = "windows"),
+    }
+}
+
+#[tauri::command]
+fn open_settings(app: AppHandle) {
+    let _ = app.emit("open-settings", ());
+}
+
+#[tauri::command]
+fn set_notification_mode(
+    mode: NotificationMode,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
     let state = state.inner().clone();
     *state
         .notification_mode
@@ -586,11 +617,15 @@ fn stop_relay_client(state: &Arc<AppState>) -> Result<(), String> {
 
 fn relay_poll_loop(app: AppHandle, state: Arc<AppState>) {
     let relay = current_relay_settings(&state);
-    write_log(&state, "BACKEND", &format!(
-        "云端轮询启动: base_url={}, secret_len={}",
-        relay.base_url,
-        relay.secret.len()
-    ));
+    write_log(
+        &state,
+        "BACKEND",
+        &format!(
+            "云端轮询启动: base_url={}, secret_len={}",
+            relay.base_url,
+            relay.secret.len()
+        ),
+    );
 
     let client = match Client::builder().timeout(Duration::from_secs(35)).build() {
         Ok(client) => client,
@@ -623,18 +658,28 @@ fn relay_poll_loop(app: AppHandle, state: Arc<AppState>) {
         match request.send() {
             Ok(response) => {
                 let status = response.status();
-                write_log(&state, "BACKEND", &format!("收到响应: HTTP {}", status.as_u16()));
+                write_log(
+                    &state,
+                    "BACKEND",
+                    &format!("收到响应: HTTP {}", status.as_u16()),
+                );
 
                 if status.is_success() {
                     match response.text() {
                         Ok(body) => {
-                            write_log(&state, "BACKEND", &format!("响应体 (前500字符): {}", 
-                                &body[..body.len().min(500)]));
+                            write_log(
+                                &state,
+                                "BACKEND",
+                                &format!("响应体 (前500字符): {}", &body[..body.len().min(500)]),
+                            );
                             match serde_json::from_str::<RelayPollResponse>(&body) {
                                 Ok(payload) => {
                                     consecutive_errors = 0;
-                                    write_log(&state, "BACKEND", &format!(
-                                        "解析成功, 消息数: {}", payload.messages.len()));
+                                    write_log(
+                                        &state,
+                                        "BACKEND",
+                                        &format!("解析成功, 消息数: {}", payload.messages.len()),
+                                    );
                                     for relay_message in payload.messages {
                                         if !relay_is_running(&state) {
                                             break;
@@ -649,18 +694,30 @@ fn relay_poll_loop(app: AppHandle, state: Arc<AppState>) {
                                             relay_message.remote_addr,
                                         ));
                                         after = relay_message.received_at.clone();
-                                        if let Some(message) = message_from_relay(relay_message, &state) {
+                                        if let Some(message) =
+                                            message_from_relay(relay_message, &state)
+                                        {
                                             write_log(&state, "BACKEND", "消息已存储并发送到前端");
                                             store_message(&app, &state, message);
                                         } else {
-                                            write_log(&state, "BACKEND", "消息被过滤: 设备ID未匹配");
+                                            write_log(
+                                                &state,
+                                                "BACKEND",
+                                                "消息被过滤: 设备ID未匹配",
+                                            );
                                         }
                                     }
                                 }
                                 Err(error) => {
                                     consecutive_errors += 1;
-                                    write_log(&state, "BACKEND", &format!(
-                                        "JSON解析失败(连续{}次): {} | 原始响应体: {}", consecutive_errors, error, body));
+                                    write_log(
+                                        &state,
+                                        "BACKEND",
+                                        &format!(
+                                            "JSON解析失败(连续{}次): {} | 原始响应体: {}",
+                                            consecutive_errors, error, body
+                                        ),
+                                    );
                                     emit_relay_error_if_needed(
                                         &app,
                                         consecutive_errors,
@@ -672,8 +729,11 @@ fn relay_poll_loop(app: AppHandle, state: Arc<AppState>) {
                         }
                         Err(error) => {
                             consecutive_errors += 1;
-                            write_log(&state, "BACKEND", &format!(
-                                "读取响应体失败(连续{}次): {}", consecutive_errors, error));
+                            write_log(
+                                &state,
+                                "BACKEND",
+                                &format!("读取响应体失败(连续{}次): {}", consecutive_errors, error),
+                            );
                             emit_relay_error_if_needed(
                                 &app,
                                 consecutive_errors,
@@ -684,8 +744,15 @@ fn relay_poll_loop(app: AppHandle, state: Arc<AppState>) {
                     }
                 } else {
                     consecutive_errors += 1;
-                    write_log(&state, "BACKEND", &format!(
-                        "HTTP错误(连续{}次): {}", consecutive_errors, status.as_u16()));
+                    write_log(
+                        &state,
+                        "BACKEND",
+                        &format!(
+                            "HTTP错误(连续{}次): {}",
+                            consecutive_errors,
+                            status.as_u16()
+                        ),
+                    );
                     emit_relay_error_if_needed(
                         &app,
                         consecutive_errors,
@@ -696,8 +763,11 @@ fn relay_poll_loop(app: AppHandle, state: Arc<AppState>) {
             }
             Err(error) => {
                 consecutive_errors += 1;
-                write_log(&state, "BACKEND", &format!(
-                    "网络请求失败(连续{}次): {}", consecutive_errors, error));
+                write_log(
+                    &state,
+                    "BACKEND",
+                    &format!("网络请求失败(连续{}次): {}", consecutive_errors, error),
+                );
                 if relay_is_running(&state) {
                     emit_relay_error_if_needed(
                         &app,
@@ -808,19 +878,37 @@ fn receiver_is_running(state: &Arc<AppState>) -> bool {
 }
 
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
+    let tray_settings = MenuItem::with_id(app, MENU_SETTINGS_ID, "设置...", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, TRAY_EXIT_ID, "退出程序", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&quit])?;
+    let menu = Menu::with_items(app, &[&tray_settings, &quit])?;
     let icon = Image::from_bytes(include_bytes!("../icons/icon.ico"))?;
+
+    #[cfg(target_os = "macos")]
+    {
+        let menu_settings =
+            MenuItem::with_id(app, MENU_SETTINGS_ID, "设置...", true, Some("CmdOrCtrl+,"))?;
+        let menu_quit =
+            MenuItem::with_id(app, TRAY_EXIT_ID, "退出程序", true, Some("CmdOrCtrl+Q"))?;
+        let app_menu =
+            Submenu::with_items(app, "验证码接收器", true, &[&menu_settings, &menu_quit])?;
+        let main_menu = Menu::with_items(app, &[&app_menu])?;
+        app.set_menu(main_menu)?;
+    }
 
     TrayIconBuilder::new()
         .icon(icon)
         .tooltip("验证码接收器")
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| {
-            if event.id().as_ref() == TRAY_EXIT_ID {
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            MENU_SETTINGS_ID => {
+                let _ = app.emit("open-settings", ());
+                show_main_window(app);
+            }
+            TRAY_EXIT_ID => {
                 app.exit(0);
             }
+            _ => {}
         })
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click {
@@ -998,11 +1086,14 @@ fn store_message(app: &AppHandle, state: &Arc<AppState>, message: IncomingMessag
 fn show_message_notification(
     app: &AppHandle,
     message: &IncomingMessage,
-    position: NotificationPosition,
+    mut position: NotificationPosition,
 ) {
     let app_for_thread = app.clone();
     let app = app.clone();
     let message = message.clone();
+    if cfg!(target_os = "macos") {
+        position = NotificationPosition::TopRight;
+    }
 
     let _ = app_for_thread.run_on_main_thread(move || {
         let window = match ensure_notification_window(&app) {
@@ -1160,6 +1251,7 @@ fn default_notification_position() -> NotificationPosition {
     NotificationPosition::BottomRight
 }
 
+#[cfg(target_os = "windows")]
 fn type_text(text: &str) -> Result<(), String> {
     if text.is_empty() {
         return Ok(());
@@ -1183,6 +1275,12 @@ fn type_text(text: &str) -> Result<(), String> {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
+fn type_text(_text: &str) -> Result<(), String> {
+    Err("当前平台暂不支持直接输入".to_string())
+}
+
+#[cfg(target_os = "windows")]
 fn unicode_input(unit: u16, flags: KEYBD_EVENT_FLAGS) -> INPUT {
     INPUT {
         r#type: INPUT_KEYBOARD,
@@ -1367,6 +1465,11 @@ pub fn run() {
                 let _ = app.emit("receiver-error", format!("通知窗口初始化失败: {}", error));
             }
             if let Some(window) = app.get_webview_window("main") {
+                #[cfg(target_os = "macos")]
+                {
+                    let _ = window.set_decorations(true);
+                    let _ = window.set_title_bar_style(TitleBarStyle::Overlay);
+                }
                 let window_for_close = window.clone();
                 window.on_window_event(move |event| {
                     if let WindowEvent::CloseRequested { api, .. } = event {
@@ -1388,6 +1491,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_messages,
             clear_messages,
+            platform_info,
+            open_settings,
             receiver_status,
             set_notification_mode,
             set_notification_position,
