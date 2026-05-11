@@ -52,7 +52,7 @@ jobs:
           body: |
             ## 更新内容
             - 版本升级至 ${{ github.ref_name }}
-          draft: true
+          draft: false
           files: |
             src-tauri/target/release/bundle/msi/derek-msg-sync_*.msi
             src-tauri/target/release/bundle/nsis/derek-msg-sync_*Setup.exe

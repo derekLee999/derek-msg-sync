@@ -1,8 +1,8 @@
 [package]
 name = "derek-msg-sync"
-version = "0.0.5"
+version = "0.0.6"
 description = "A Tauri App"
-authors = ["you"]
+authors = ["Derek Lee"]
 license = "Apache-2.0"
 edition = "2021"
 
