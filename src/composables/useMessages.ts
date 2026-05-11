@@ -194,18 +194,24 @@ export function useMessages() {
 
   async function toggleReceiver(options: ToggleReceiverOptions = {}) {
     const running = status.value?.receiverRunning ?? false
-    if (running) {
-      const confirmed = options.confirmStop ? await options.confirmStop() : true
-      if (!confirmed) {
-        return
+    error.value = ''
+    try {
+      if (running) {
+        const confirmed = options.confirmStop ? await options.confirmStop() : true
+        if (!confirmed) {
+          return
+        }
+
+        await invoke('stop_receiver')
+      } else {
+        await invoke('start_receiver_command')
       }
 
-      await invoke('stop_receiver')
-    } else {
-      await invoke('start_receiver_command')
+      await refreshStatus()
+    } catch (cause) {
+      error.value = String(cause)
+      throw cause
     }
-
-    await refreshStatus()
   }
 
   let stopMessageListener: (() => void) | null = null

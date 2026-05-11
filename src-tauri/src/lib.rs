@@ -40,6 +40,8 @@ const NOTIFICATION_HEIGHT: f64 = 116.0;
 const NOTIFICATION_MARGIN: i32 = 18;
 const DEFAULT_RELAY_POLL_INTERVAL: Duration = Duration::from_secs(2);
 const RELAY_ERROR_REPORT_THRESHOLD: u32 = 3;
+const RECEIVER_START_RETRY_ATTEMPTS: u8 = 6;
+const RECEIVER_START_RETRY_DELAY: Duration = Duration::from_millis(150);
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -154,6 +156,8 @@ struct ReceiverStatus {
 #[serde(rename_all = "camelCase")]
 struct AppSettings {
     port: u16,
+    #[serde(default = "default_receiver_enabled")]
+    receiver_enabled: bool,
     #[serde(default = "default_notification_mode")]
     notification_mode: NotificationMode,
     #[serde(default)]
@@ -173,6 +177,7 @@ struct AppState {
     storage_path: PathBuf,
     settings_path: PathBuf,
     port: Mutex<u16>,
+    receiver_enabled: Mutex<bool>,
     notification_mode: Mutex<NotificationMode>,
     notification_position: Mutex<NotificationPosition>,
     direct_paste_enabled: Mutex<bool>,
@@ -373,12 +378,38 @@ fn set_sender_devices(
 
 #[tauri::command]
 fn start_receiver_command(app: AppHandle, state: State<'_, Arc<AppState>>) -> Result<(), String> {
-    start_receiver(app, state.inner().clone())
+    let state = state.inner().clone();
+    write_log(
+        &state,
+        "BACKEND",
+        &format!("收到启动监听请求: port={}", current_port(&state)),
+    );
+    start_receiver(app, state.clone())?;
+    set_receiver_enabled(&state, true)?;
+    persist_settings(&state).map_err(|error| {
+        write_log(&state, "BACKEND", &format!("启动监听状态保存失败: {}", error));
+        error
+    })?;
+    write_log(&state, "BACKEND", "启动监听状态已保存");
+    Ok(())
 }
 
 #[tauri::command]
 fn stop_receiver(state: State<'_, Arc<AppState>>) -> Result<(), String> {
-    stop_receiver_inner(state.inner())
+    let state = state.inner().clone();
+    write_log(
+        &state,
+        "BACKEND",
+        &format!("收到停止监听请求: port={}", current_port(&state)),
+    );
+    stop_receiver_inner(&state)?;
+    set_receiver_enabled(&state, false)?;
+    persist_settings(&state).map_err(|error| {
+        write_log(&state, "BACKEND", &format!("停止监听状态保存失败: {}", error));
+        error
+    })?;
+    write_log(&state, "BACKEND", "停止监听状态已保存");
+    Ok(())
 }
 
 #[tauri::command]
@@ -401,6 +432,11 @@ fn set_receiver_port(
 
     let was_running = receiver_is_running(&state);
     if was_running {
+        write_log(
+            &state,
+            "BACKEND",
+            &format!("端口更新前停止监听: old_port={}, new_port={}", current_port(&state), port),
+        );
         stop_receiver_inner(&state)?;
         thread::sleep(Duration::from_millis(350));
     }
@@ -412,6 +448,11 @@ fn set_receiver_port(
     persist_settings(&state)?;
 
     if was_running {
+        write_log(
+            &state,
+            "BACKEND",
+            &format!("端口更新后重新启动监听: port={}", port),
+        );
         start_receiver(app, state)?;
     }
 
@@ -419,6 +460,7 @@ fn set_receiver_port(
 }
 
 fn stop_receiver_inner(state: &Arc<AppState>) -> Result<(), String> {
+    let port = current_port(state);
     let server = state
         .receiver
         .lock()
@@ -426,7 +468,11 @@ fn stop_receiver_inner(state: &Arc<AppState>) -> Result<(), String> {
         .take();
 
     if let Some(server) = server {
+        write_log(state, "BACKEND", &format!("正在停止监听服务: port={}", port));
         server.unblock();
+        write_log(state, "BACKEND", &format!("监听服务已停止: port={}", port));
+    } else {
+        write_log(state, "BACKEND", &format!("监听服务已是停止状态: port={}", port));
     }
 
     Ok(())
@@ -434,32 +480,72 @@ fn stop_receiver_inner(state: &Arc<AppState>) -> Result<(), String> {
 
 fn start_receiver(app: AppHandle, state: Arc<AppState>) -> Result<(), String> {
     if receiver_is_running(&state) {
+        write_log(
+            &state,
+            "BACKEND",
+            &format!("监听服务已在运行，跳过启动: port={}", current_port(&state)),
+        );
         return Ok(());
     }
 
     let port = current_port(&state);
-    let server = Arc::new(
-        Server::http(("0.0.0.0", port)).map_err(|error| format!("接收服务启动失败: {}", error))?,
-    );
+    write_log(&state, "BACKEND", &format!("正在启动监听服务: port={}", port));
+    let server = bind_receiver_server(&state, port)?;
+    write_log(&state, "BACKEND", &format!("监听端口绑定成功: port={}", port));
 
     *state
         .receiver
         .lock()
         .map_err(|_| "接收服务状态不可用".to_string())? = Some(server.clone());
 
+    let thread_state = state.clone();
     thread::spawn(move || loop {
-        if !receiver_is_running(&state) {
+        if !receiver_is_running(&thread_state) {
+            write_log(&thread_state, "BACKEND", "监听线程退出: 状态已停止");
             break;
         }
 
         match server.recv_timeout(Duration::from_millis(250)) {
-            Ok(Some(request)) => handle_request(request, &app, &state),
+            Ok(Some(request)) => handle_request(request, &app, &thread_state),
             Ok(None) => {}
-            Err(_) => break,
+            Err(error) => {
+                write_log(&thread_state, "BACKEND", &format!("监听线程退出: {}", error));
+                break;
+            }
         }
     });
 
+    write_log(&state, "BACKEND", &format!("监听服务已启动: port={}", port));
     Ok(())
+}
+
+fn bind_receiver_server(state: &Arc<AppState>, port: u16) -> Result<Arc<Server>, String> {
+    let mut last_error = String::new();
+
+    for attempt in 0..RECEIVER_START_RETRY_ATTEMPTS {
+        match Server::http(("0.0.0.0", port)) {
+            Ok(server) => return Ok(Arc::new(server)),
+            Err(error) => {
+                last_error = error.to_string();
+                write_log(
+                    state,
+                    "BACKEND",
+                    &format!(
+                        "监听端口绑定失败: port={}, attempt={}/{}, error={}",
+                        port,
+                        attempt + 1,
+                        RECEIVER_START_RETRY_ATTEMPTS,
+                        last_error
+                    ),
+                );
+                if attempt + 1 < RECEIVER_START_RETRY_ATTEMPTS {
+                    thread::sleep(RECEIVER_START_RETRY_DELAY);
+                }
+            }
+        }
+    }
+
+    Err(format!("接收服务启动失败: {}", last_error))
 }
 
 fn current_port(state: &Arc<AppState>) -> u16 {
@@ -468,6 +554,22 @@ fn current_port(state: &Arc<AppState>) -> u16 {
         .lock()
         .map(|port| *port)
         .unwrap_or(DEFAULT_SERVER_PORT)
+}
+
+fn current_receiver_enabled(state: &Arc<AppState>) -> bool {
+    state
+        .receiver_enabled
+        .lock()
+        .map(|enabled| *enabled)
+        .unwrap_or_else(|_| default_receiver_enabled())
+}
+
+fn set_receiver_enabled(state: &Arc<AppState>, enabled: bool) -> Result<(), String> {
+    *state
+        .receiver_enabled
+        .lock()
+        .map_err(|_| "接收服务设置不可用".to_string())? = enabled;
+    Ok(())
 }
 
 fn validate_port(port: u16) -> Result<(), String> {
@@ -489,7 +591,7 @@ fn current_notification_mode(state: &Arc<AppState>) -> NotificationMode {
 fn should_show_notification(state: &Arc<AppState>, message: &IncomingMessage) -> bool {
     match current_notification_mode(state) {
         NotificationMode::All => true,
-        NotificationMode::Verification => message_has_verification_keyword(message),
+        NotificationMode::Verification => message_is_verification_notice(message),
         NotificationMode::Off => false,
     }
 }
@@ -1111,6 +1213,7 @@ fn load_settings(path: PathBuf) -> AppSettings {
         .filter(|settings| validate_port(settings.port).is_ok())
         .unwrap_or(AppSettings {
             port: DEFAULT_SERVER_PORT,
+            receiver_enabled: default_receiver_enabled(),
             notification_mode: default_notification_mode(),
             notification_enabled: None,
             notification_position: default_notification_position(),
@@ -1123,6 +1226,7 @@ fn load_settings(path: PathBuf) -> AppSettings {
 fn persist_settings(state: &Arc<AppState>) -> Result<(), String> {
     let settings = AppSettings {
         port: current_port(state),
+        receiver_enabled: current_receiver_enabled(state),
         notification_mode: current_notification_mode(state),
         notification_enabled: None,
         notification_position: current_notification_position(state),
@@ -1154,6 +1258,10 @@ fn normalize_loaded_settings(mut settings: AppSettings) -> AppSettings {
 
 fn default_notification_mode() -> NotificationMode {
     NotificationMode::Verification
+}
+
+fn default_receiver_enabled() -> bool {
+    true
 }
 
 fn default_notification_position() -> NotificationPosition {
@@ -1306,9 +1414,22 @@ fn extract_code(text: &str) -> Option<String> {
         .map(|matched| matched.as_str().to_string())
 }
 
-fn message_has_verification_keyword(message: &IncomingMessage) -> bool {
+fn message_is_verification_notice(message: &IncomingMessage) -> bool {
     let content = format!("{} {}", message.text, message.copied_text);
+    message_has_verification_keyword(&content) && message_has_short_code(&content)
+}
+
+fn message_has_verification_keyword(content: &str) -> bool {
     content.contains("验证码") || content.contains("校验码")
+}
+
+fn message_has_short_code(content: &str) -> bool {
+    static SHORT_CODE_RE: OnceLock<Regex> = OnceLock::new();
+    SHORT_CODE_RE
+        .get_or_init(|| {
+            Regex::new(r"(?:^|[^\d])\d{4,6}(?:[^\d]|$)").expect("valid short code regex")
+        })
+        .is_match(content)
 }
 
 fn local_ipv4() -> Option<String> {
@@ -1347,6 +1468,7 @@ pub fn run() {
                 storage_path,
                 settings_path,
                 port: Mutex::new(settings.port),
+                receiver_enabled: Mutex::new(settings.receiver_enabled),
                 notification_mode: Mutex::new(settings.notification_mode),
                 notification_position: Mutex::new(settings.notification_position),
                 direct_paste_enabled: Mutex::new(settings.direct_paste_enabled),
@@ -1375,8 +1497,14 @@ pub fn run() {
                     }
                 });
             }
-            if let Err(error) = start_receiver(app.handle().clone(), state.clone()) {
-                let _ = app.emit("receiver-error", error);
+            if current_receiver_enabled(&state) {
+                match start_receiver(app.handle().clone(), state.clone()) {
+                    Ok(()) if receiver_is_running(&state) => hide_main_window(app.handle()),
+                    Ok(()) => {}
+                    Err(error) => {
+                        let _ = app.emit("receiver-error", error);
+                    }
+                }
             }
             if current_relay_settings(&state).enabled {
                 if let Err(error) = start_relay_client(app.handle().clone(), state.clone()) {
@@ -1410,6 +1538,12 @@ fn show_main_window(app: &AppHandle) {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
+    }
+}
+
+fn hide_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
     }
 }
 
