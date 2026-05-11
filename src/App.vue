@@ -16,6 +16,7 @@ const {
   loading,
   error,
   lastReceived,
+  receiverAction,
   senderDevices,
   verificationFilterEnabled,
   totalCount,
@@ -244,6 +245,7 @@ async function handleRelayConnectionTest(relay: { enabled: boolean; baseUrl: str
       <StatusBar
         :status="status"
         :last-received="lastReceived"
+        :receiver-action="receiverAction"
         @copy-ip="handleCopyLocalIp"
         @copy-recent="handleCopyRecent"
         @refresh="refresh"

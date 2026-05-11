@@ -6,7 +6,7 @@ use std::{
     collections::{HashSet, VecDeque},
     fs,
     io::{Read, Write},
-    net::{Ipv4Addr, UdpSocket},
+    net::{Ipv4Addr, Shutdown, TcpListener, TcpStream, UdpSocket},
     path::PathBuf,
     sync::{Arc, Mutex, OnceLock},
     thread,
@@ -42,6 +42,8 @@ const DEFAULT_RELAY_POLL_INTERVAL: Duration = Duration::from_secs(2);
 const RELAY_ERROR_REPORT_THRESHOLD: u32 = 3;
 const RECEIVER_START_RETRY_ATTEMPTS: u8 = 6;
 const RECEIVER_START_RETRY_DELAY: Duration = Duration::from_millis(150);
+const RECEIVER_STOP_RELEASE_ATTEMPTS: u8 = 20;
+const RECEIVER_STOP_RELEASE_DELAY: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -470,7 +472,17 @@ fn stop_receiver_inner(state: &Arc<AppState>) -> Result<(), String> {
     if let Some(server) = server {
         write_log(state, "BACKEND", &format!("正在停止监听服务: port={}", port));
         server.unblock();
-        write_log(state, "BACKEND", &format!("监听服务已停止: port={}", port));
+        drop(server);
+
+        if wait_for_receiver_port_release(state, port) {
+            write_log(state, "BACKEND", &format!("监听服务已停止: port={}", port));
+        } else {
+            write_log(
+                state,
+                "BACKEND",
+                &format!("监听服务停止后端口仍被占用: port={}", port),
+            );
+        }
     } else {
         write_log(state, "BACKEND", &format!("监听服务已是停止状态: port={}", port));
     }
@@ -546,6 +558,40 @@ fn bind_receiver_server(state: &Arc<AppState>, port: u16) -> Result<Arc<Server>,
     }
 
     Err(format!("接收服务启动失败: {}", last_error))
+}
+
+fn wait_for_receiver_port_release(state: &Arc<AppState>, port: u16) -> bool {
+    for attempt in 0..RECEIVER_STOP_RELEASE_ATTEMPTS {
+        wake_receiver_listener(port);
+
+        if receiver_port_is_available(port) {
+            write_log(
+                state,
+                "BACKEND",
+                &format!(
+                    "监听端口已释放: port={}, attempt={}/{}",
+                    port,
+                    attempt + 1,
+                    RECEIVER_STOP_RELEASE_ATTEMPTS
+                ),
+            );
+            return true;
+        }
+
+        thread::sleep(RECEIVER_STOP_RELEASE_DELAY);
+    }
+
+    false
+}
+
+fn wake_receiver_listener(port: u16) {
+    if let Ok(stream) = TcpStream::connect((Ipv4Addr::LOCALHOST, port)) {
+        let _ = stream.shutdown(Shutdown::Both);
+    }
+}
+
+fn receiver_port_is_available(port: u16) -> bool {
+    TcpListener::bind((Ipv4Addr::UNSPECIFIED, port)).is_ok()
 }
 
 fn current_port(state: &Arc<AppState>) -> u16 {
@@ -1575,5 +1621,30 @@ mod tests {
         assert_eq!(message.relay_id, "relay-1");
         assert_eq!(message.received_at, "2026-05-10T17:17:50.821834468Z");
         assert_eq!(message.remote_addr, "74.48.90.147");
+    }
+
+    #[test]
+    fn receiver_port_release_wakes_unspecified_listener() {
+        let server = Arc::new(Server::http((Ipv4Addr::UNSPECIFIED, 0)).unwrap());
+        let port = server.server_addr().to_ip().unwrap().port();
+        let server_for_thread = server.clone();
+
+        let handle = thread::spawn(move || {
+            let _ = server_for_thread.recv_timeout(Duration::from_secs(10));
+        });
+
+        server.unblock();
+        drop(server);
+        wake_receiver_listener(port);
+        handle.join().unwrap();
+
+        for _ in 0..RECEIVER_STOP_RELEASE_ATTEMPTS {
+            if receiver_port_is_available(port) {
+                return;
+            }
+            thread::sleep(RECEIVER_STOP_RELEASE_DELAY);
+        }
+
+        panic!("receiver port should be available after stop");
     }
 }

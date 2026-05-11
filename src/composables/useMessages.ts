@@ -34,6 +34,7 @@ export function useMessages() {
   const lastReceived = shallowRef('')
   const senderDevices = shallowRef<SenderDevice[]>([])
   const verificationFilterEnabled = shallowRef(true)
+  const receiverAction = shallowRef<'starting' | 'stopping' | null>(null)
 
   const latestMessage = computed(() => messages.value[0] ?? null)
   const totalCount = computed(() => messages.value.length)
@@ -194,6 +195,10 @@ export function useMessages() {
 
   async function toggleReceiver(options: ToggleReceiverOptions = {}) {
     const running = status.value?.receiverRunning ?? false
+    if (receiverAction.value) {
+      return
+    }
+
     error.value = ''
     try {
       if (running) {
@@ -202,8 +207,10 @@ export function useMessages() {
           return
         }
 
+        receiverAction.value = 'stopping'
         await invoke('stop_receiver')
       } else {
+        receiverAction.value = 'starting'
         await invoke('start_receiver_command')
       }
 
@@ -211,6 +218,8 @@ export function useMessages() {
     } catch (cause) {
       error.value = String(cause)
       throw cause
+    } finally {
+      receiverAction.value = null
     }
   }
 
@@ -266,6 +275,7 @@ export function useMessages() {
     loading,
     error,
     lastReceived,
+    receiverAction,
     senderDevices,
     verificationFilterEnabled,
     latestMessage,

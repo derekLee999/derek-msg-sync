@@ -1,10 +1,35 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { ReceiverStatus } from '../types'
 
-defineProps<{
+const props = defineProps<{
   status: ReceiverStatus | null
   lastReceived: string
+  receiverAction: 'starting' | 'stopping' | null
 }>()
+
+const receiverBusy = computed(() => props.receiverAction !== null)
+const receiverButtonTitle = computed(() => {
+  if (props.receiverAction === 'stopping') {
+    return '正在停止监听服务'
+  }
+  if (props.receiverAction === 'starting') {
+    return '正在启动监听服务'
+  }
+
+  return props.status?.receiverRunning === false ? '启动监听服务' : '停止监听服务'
+})
+
+const receiverButtonText = computed(() => {
+  if (props.receiverAction === 'stopping') {
+    return '停止中'
+  }
+  if (props.receiverAction === 'starting') {
+    return '启动中'
+  }
+
+  return props.status?.receiverRunning === false ? '未启动' : '监听中'
+})
 
 const emit = defineEmits<{
   copyIp: []
@@ -18,11 +43,20 @@ const emit = defineEmits<{
   <section class="status-bar">
     <button
       type="button"
-      :class="['status-item', 'receiver-button', { stopped: status && !status.receiverRunning }]"
-      :title="status?.receiverRunning === false ? '启动监听服务' : '停止监听服务'"
+      :class="[
+        'status-item',
+        'receiver-button',
+        {
+          stopped: status && !status.receiverRunning,
+          busy: receiverBusy,
+        },
+      ]"
+      :disabled="receiverBusy"
+      :title="receiverButtonTitle"
       @click="emit('toggleReceiver')"
     >
-      <strong>{{ status?.receiverRunning === false ? '未启动' : '监听中' }}</strong>
+      <span v-if="receiverBusy" class="receiver-spinner" aria-hidden="true"></span>
+      <strong>{{ receiverButtonText }}</strong>
     </button>
     <div class="status-item">
       <p class="status-label">端口</p>
@@ -96,6 +130,11 @@ const emit = defineEmits<{
   cursor: pointer;
   font: inherit;
   text-align: center;
+  transition:
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    background-color 0.16s ease,
+    color 0.16s ease;
 }
 
 .receiver-button strong {
@@ -111,10 +150,43 @@ const emit = defineEmits<{
     0 12px 24px rgba(32, 180, 134, 0.12);
 }
 
+.receiver-button:disabled {
+  cursor: wait;
+}
+
 .receiver-button.stopped {
   border-color: rgba(102, 112, 133, 0.28);
   color: #667085;
   background: #f2f4f7;
+}
+
+.receiver-button.busy {
+  border-color: rgba(23, 105, 224, 0.46);
+  color: #1769e0;
+  background: #e8f1ff;
+  box-shadow:
+    0 0 0 3px rgba(23, 105, 224, 0.1),
+    0 12px 24px rgba(23, 105, 224, 0.12);
+}
+
+.receiver-button.busy strong {
+  color: #1769e0;
+}
+
+.receiver-spinner {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  border: 2px solid rgba(23, 105, 224, 0.22);
+  border-top-color: #1769e0;
+  border-radius: 50%;
+  animation: receiver-spin 0.8s linear infinite;
+}
+
+@keyframes receiver-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .receiver-button.stopped strong {
