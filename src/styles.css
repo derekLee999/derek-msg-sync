@@ -3,9 +3,29 @@
 }
 
 :root {
-  color: #17202f;
-  background: #eef3f8;
+  --text-primary: #1d1d1f;
+  --text-secondary: #515154;
+  --glass-bg-heavy: rgba(255, 255, 255, 0.65);
+  --glass-bg-medium: rgba(255, 255, 255, 0.45);
+  --glass-bg-light: rgba(255, 255, 255, 0.25);
+  --glass-border: rgba(255, 255, 255, 0.6);
+  --glass-border-light: rgba(255, 255, 255, 0.3);
+  --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.08);
+  --glass-shadow-heavy: 0 16px 48px 0 rgba(0, 0, 0, 0.15);
+  --glass-blur: blur(28px) saturate(180%);
+  --glass-radius-large: 24px;
+  --glass-radius-medium: 16px;
+  --glass-radius-small: 10px;
+  
+  --accent-blue: #0071e3;
+  --accent-blue-hover: #007aff;
+  --accent-gradient: linear-gradient(135deg, #007aff, #5ac8fa);
+
+  color: var(--text-primary);
+  background: transparent;
   font-family:
+    "SF Pro Display",
+    "SF Pro Text",
     "Segoe UI",
     "Microsoft YaHei",
     system-ui,
@@ -33,6 +53,30 @@ body {
   height: 100vh;
   margin: 0;
   overflow: hidden;
+  background: linear-gradient(120deg, #fdfbfb 0%, #ebedee 100%);
+}
+
+/* Animated liquid glass background */
+body::before {
+  content: "";
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: 
+    radial-gradient(circle at 50% 50%, rgba(90, 200, 250, 0.3), transparent 60%),
+    radial-gradient(circle at 80% 20%, rgba(255, 45, 85, 0.15), transparent 50%),
+    radial-gradient(circle at 20% 80%, rgba(0, 122, 255, 0.2), transparent 50%);
+  animation: liquidRotate 25s linear infinite;
+  z-index: -1;
+  pointer-events: none;
+}
+
+@keyframes liquidRotate {
+  0% { transform: rotate(0deg) scale(1); }
+  50% { transform: rotate(180deg) scale(1.1); }
+  100% { transform: rotate(360deg) scale(1); }
 }
 
 #app {
@@ -44,6 +88,9 @@ body {
 body.notification-window {
   min-width: 0;
   background: transparent;
+}
+body.notification-window::before {
+  display: none;
 }
 
 body.notification-window,
@@ -58,27 +105,33 @@ input {
 
 button {
   transition:
-    transform 0.16s ease,
-    filter 0.16s ease,
-    background-color 0.16s ease;
+    transform 0.2s cubic-bezier(0.25, 1, 0.5, 1),
+    filter 0.2s ease,
+    background-color 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 button:not(:disabled):hover {
-  filter: brightness(0.97);
+  filter: brightness(1.05);
 }
 
 button:not(:disabled):active {
-  transform: translateY(1px);
+  transform: scale(0.96);
 }
 
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
 }
 
 ::-webkit-scrollbar-thumb {
-  border: 3px solid transparent;
+  border: 4px solid transparent;
   border-radius: 999px;
-  background: rgba(102, 112, 133, 0.35);
+  background: var(--glass-bg-heavy);
+  background-clip: content-box;
+  box-shadow: inset 0 0 0 1px var(--glass-border-light);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
   background-clip: content-box;
 }

@@ -371,8 +371,8 @@ onUnmounted(() => {
   height: 100%;
   overflow: hidden;
   display: grid;
-  grid-template-rows: 40px minmax(0, 1fr);
-  background: #eef3f8;
+  grid-template-rows: 44px minmax(0, 1fr);
+  background: transparent;
 }
 
 body.macos .window-frame {
@@ -384,9 +384,10 @@ body.macos .window-frame {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 0 8px 0 14px;
-  border-bottom: 1px solid rgba(28, 39, 54, 0.08);
-  background: rgba(245, 248, 252, 0.92);
+  padding: 0 12px 0 16px;
+  border-bottom: 1px solid var(--glass-border-light);
+  background: var(--glass-bg-medium);
+  backdrop-filter: var(--glass-blur);
   user-select: none;
 }
 
@@ -394,9 +395,9 @@ body.macos .window-frame {
   -webkit-app-region: drag;
   justify-content: flex-start;
   padding: 0 16px 0 82px;
-  border-bottom-color: rgba(28, 39, 54, 0.07);
-  background: rgba(248, 250, 252, 0.82);
-  backdrop-filter: blur(18px);
+  border-bottom-color: var(--glass-border-light);
+  background: var(--glass-bg-medium);
+  backdrop-filter: var(--glass-blur);
 }
 
 .titlebar-title,
@@ -408,9 +409,10 @@ body.macos .window-frame {
 
 .titlebar-title {
   min-width: 0;
-  color: #17202f;
-  font-size: 14px;
-  font-weight: 700;
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
 }
 
 .titlebar-app-icon {
@@ -422,13 +424,13 @@ body.macos .window-frame {
 }
 
 .titlebar-icon {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   display: grid;
   place-items: center;
   border: 0;
-  border-radius: 7px;
-  color: #465160;
+  border-radius: var(--glass-radius-small);
+  color: var(--text-secondary);
   background: transparent;
   cursor: pointer;
 }
@@ -445,13 +447,13 @@ body.macos .window-frame {
 
 .titlebar-icon:hover,
 .titlebar-icon.active {
-  color: #1769e0;
-  background: #e8f1ff;
+  color: var(--accent-blue);
+  background: var(--glass-bg-light);
 }
 
 .titlebar-icon.close:hover {
-  color: #b42318;
-  background: #fee4e2;
+  color: #ff3b30;
+  background: rgba(255, 59, 48, 0.1);
 }
 
 .app-shell {
@@ -459,25 +461,26 @@ body.macos .window-frame {
   overflow: hidden;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
-  gap: 10px;
+  gap: 12px;
   padding: 16px;
-  background:
-    linear-gradient(135deg, rgba(23, 105, 224, 0.08), transparent 34%),
-    linear-gradient(180deg, #f4f7fb 0%, #eef3f8 100%);
+  background: transparent;
 }
 
 .error-banner {
   margin: 0;
-  padding: 10px 12px;
+  padding: 12px 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  border: 1px solid #ffd8d6;
-  border-radius: 8px;
-  color: #a63932;
-  background: #fff1f0;
-  font-size: 13px;
+  border: 1px solid rgba(255, 59, 48, 0.3);
+  border-radius: var(--glass-radius-medium);
+  color: #ff3b30;
+  background: rgba(255, 59, 48, 0.12);
+  backdrop-filter: var(--glass-blur);
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(255, 59, 48, 0.1);
 }
 
 .error-banner span {
@@ -488,20 +491,20 @@ body.macos .window-frame {
 }
 
 .error-banner button {
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   flex: 0 0 auto;
   display: grid;
   place-items: center;
   border: 0;
-  border-radius: 6px;
-  color: #a63932;
-  background: transparent;
+  border-radius: var(--glass-radius-small);
+  color: #ff3b30;
+  background: rgba(255, 59, 48, 0.1);
   cursor: pointer;
 }
 
 .error-banner button:hover {
-  background: #ffe4e2;
+  background: rgba(255, 59, 48, 0.2);
 }
 
 .error-banner svg {
@@ -521,31 +524,34 @@ body.macos .window-frame {
   display: grid;
   place-items: center;
   padding: 20px;
-  background: rgba(15, 23, 42, 0.42);
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(12px);
 }
 
 .modal-window {
-  width: min(620px, calc(100vw - 40px));
+  width: min(640px, calc(100vw - 40px));
   max-height: calc(100vh - 40px);
   overflow: hidden;
-  border: 1px solid rgba(28, 39, 54, 0.12);
-  border-radius: 10px;
-  background: #ffffff;
-  box-shadow: 0 24px 70px rgba(28, 39, 54, 0.26);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--glass-radius-large);
+  background: var(--glass-bg-heavy);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shadow-heavy);
 }
 
 .modal-titlebar {
-  height: 40px;
+  height: 54px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 0 8px 0 14px;
-  border-bottom: 1px solid rgba(28, 39, 54, 0.08);
-  color: #17202f;
-  background: #f8fafc;
-  font-size: 14px;
-  font-weight: 700;
+  gap: 12px;
+  padding: 0 16px 0 20px;
+  border-bottom: 1px solid var(--glass-border-light);
+  color: var(--text-primary);
+  background: transparent;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
 }
 
 .modal-content {
@@ -554,14 +560,14 @@ body.macos .window-frame {
 }
 
 .modal-close {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   display: grid;
   place-items: center;
   border: 0;
-  border-radius: 7px;
-  color: #465160;
-  background: transparent;
+  border-radius: var(--glass-radius-small);
+  color: var(--text-secondary);
+  background: var(--glass-bg-light);
   cursor: pointer;
 }
 
@@ -576,7 +582,7 @@ body.macos .window-frame {
 }
 
 .modal-close:hover {
-  color: #b42318;
-  background: #fee4e2;
+  color: var(--text-primary);
+  background: var(--glass-bg-medium);
 }
 </style>

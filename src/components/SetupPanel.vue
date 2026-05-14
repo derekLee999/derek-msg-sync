@@ -763,27 +763,29 @@ onMounted(() => {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 14px;
-  background: #ffffff;
+  gap: 16px;
+  padding: 16px;
+  background: transparent;
 }
 
 .settings-section {
   min-width: 0;
   display: grid;
   gap: 12px;
-  padding: 12px;
-  border: 1px solid #e7ebf1;
-  border-radius: 8px;
-  background: #fbfcfe;
+  padding: 16px;
+  border: 1px solid var(--glass-border-light);
+  border-radius: var(--glass-radius-large);
+  background: var(--glass-bg-light);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shadow);
 }
 
 .autostart-section {
-  background: #f6f9ff;
+  background: rgba(0, 122, 255, 0.05);
 }
 
 .relay-section {
-  background: #f8fbff;
+  background: rgba(90, 200, 250, 0.05);
 }
 
 .section-head,
@@ -818,6 +820,7 @@ h3 {
 h2 {
   font-size: 19px;
   line-height: 25px;
+  font-weight: 600;
 }
 
 h3 {
@@ -1015,10 +1018,10 @@ h3 {
   display: grid;
   grid-template-columns: repeat(5, minmax(38px, 1fr));
   gap: 3px;
-  padding: 3px;
-  border: 1px solid #d7dde7;
-  border-radius: 7px;
-  background: #ffffff;
+  padding: 4px;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  background: var(--glass-bg-heavy);
 }
 
 .segmented-control button {
@@ -1032,13 +1035,13 @@ h3 {
 }
 
 .segmented-control button:hover {
-  color: #1769e0;
-  background: #edf4ff;
+  color: var(--accent-blue-hover);
+  background: rgba(0, 122, 255, 0.1);
 }
 
 .segmented-control button.active {
   color: #ffffff;
-  background: #1769e0;
+  background: var(--accent-gradient);
 }
 
 .mode-segmented-control {
@@ -1046,10 +1049,10 @@ h3 {
   display: grid;
   grid-template-columns: repeat(3, 58px);
   gap: 3px;
-  padding: 3px;
-  border: 1px solid #d7dde7;
-  border-radius: 7px;
-  background: #ffffff;
+  padding: 4px;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  background: var(--glass-bg-heavy);
 }
 
 .mode-segmented-control button {
@@ -1063,22 +1066,23 @@ h3 {
 }
 
 .mode-segmented-control button:hover {
-  color: #1769e0;
-  background: #edf4ff;
+  color: var(--accent-blue-hover);
+  background: rgba(0, 122, 255, 0.1);
 }
 
 .mode-segmented-control button.active {
   color: #ffffff;
-  background: #1769e0;
+  background: var(--accent-gradient);
 }
 
 .switch-button {
   width: 46px;
-  height: 26px;
+  height: 28px;
   flex: 0 0 auto;
   padding: 3px;
+  border: 1px solid var(--glass-border);
   border-radius: 999px;
-  background: #d7dde7;
+  background: var(--glass-bg-heavy);
 }
 
 .switch-button span {
@@ -1087,12 +1091,13 @@ h3 {
   height: 20px;
   border-radius: 999px;
   background: #ffffff;
-  box-shadow: 0 2px 5px rgba(28, 39, 54, 0.2);
-  transition: transform 0.16s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  transition: transform 0.2s cubic-bezier(0.25, 1, 0.5, 1);
 }
 
 .switch-button.active {
-  background: #1769e0;
+  background: var(--accent-gradient);
+  border-color: transparent;
 }
 
 .switch-button.active span {
@@ -1102,18 +1107,20 @@ h3 {
 .control-row input {
   min-width: 0;
   width: 100%;
-  height: 36px;
-  padding: 0 10px;
-  border: 1px solid #d7dde7;
-  border-radius: 7px;
-  color: #17202f;
-  background: #ffffff;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--glass-radius-small);
+  color: var(--text-primary);
+  background: var(--glass-bg-heavy);
   font: inherit;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .control-row input:focus {
-  border-color: #1769e0;
-  outline: 2px solid rgba(23, 105, 224, 0.12);
+  border-color: var(--accent-blue);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.15);
 }
 
 .device-list {
@@ -1123,13 +1130,13 @@ h3 {
 
 .device-row {
   display: grid;
-  grid-template-columns: minmax(116px, 0.82fr) minmax(142px, 1.18fr) 32px 32px;
+  grid-template-columns: minmax(116px, 0.82fr) minmax(142px, 1.18fr) 34px 34px;
   align-items: end;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid #e7ebf1;
-  border-radius: 8px;
-  background: #ffffff;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--glass-border-light);
+  border-radius: var(--glass-radius-medium);
+  background: rgba(255, 255, 255, 0.3);
 }
 
 .device-row label {
@@ -1143,33 +1150,36 @@ h3 {
 .device-row input {
   min-width: 0;
   width: 100%;
-  height: 34px;
-  padding: 0 9px;
-  border: 1px solid #d7dde7;
-  border-radius: 7px;
-  color: #17202f;
-  background: #ffffff;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--glass-radius-small);
+  color: var(--text-primary);
+  background: var(--glass-bg-heavy);
   font: inherit;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .device-row input:focus {
-  border-color: #1769e0;
-  outline: 2px solid rgba(23, 105, 224, 0.12);
+  border-color: var(--accent-blue);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.15);
 }
 
 .device-row .device-id-input {
-  color: #0b1b31;
-  background: #ffffff;
+  color: var(--text-primary);
+  background: var(--glass-bg-heavy);
 }
 
 .device-row .device-id-input:hover {
-  border-color: #b8c2d1;
-  background: #f1f6ff;
+  border-color: var(--glass-border);
+  background: rgba(255, 255, 255, 0.8);
 }
 
 .device-row .device-id-input:focus {
-  border-color: #1769e0;
-  outline: 2px solid rgba(23, 105, 224, 0.12);
+  border-color: var(--accent-blue);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.15);
 }
 
 .device-row .device-id-input.invalid {
@@ -1189,13 +1199,15 @@ h3 {
 }
 
 button {
-  height: 36px;
+  height: 38px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--glass-radius-small);
   color: #ffffff;
-  background: #1769e0;
+  background: var(--accent-gradient);
   cursor: pointer;
   font: inherit;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(0, 122, 255, 0.2);
 }
 
 button:disabled {
@@ -1222,36 +1234,42 @@ button:disabled {
 
 .text-button {
   flex: 0 0 auto;
-  padding: 0 14px;
-  font-weight: 700;
+  padding: 0 16px;
+  font-weight: 600;
 }
 
 .small-button {
-  height: 30px;
+  height: 32px;
   flex: 0 0 auto;
-  padding: 0 10px;
-  color: #1769e0;
-  background: #e8f1ff;
-  font-size: 12px;
-  font-weight: 700;
+  padding: 0 12px;
+  color: var(--text-primary);
+  background: var(--glass-bg-heavy);
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
 .danger-button {
-  width: 32px;
-  height: 34px;
+  width: 34px;
+  height: 36px;
   display: grid;
   place-items: center;
-  color: #b42318;
-  background: #fee4e2;
+  color: #ff3b30;
+  background: rgba(255, 59, 48, 0.1);
+  border: 1px solid rgba(255, 59, 48, 0.2);
+  box-shadow: none;
 }
 
 .copy-device-button {
-  width: 32px;
-  height: 34px;
+  width: 34px;
+  height: 36px;
   display: grid;
   place-items: center;
-  color: #1769e0;
-  background: #e8f1ff;
+  color: var(--accent-blue);
+  background: rgba(0, 122, 255, 0.1);
+  border: 1px solid rgba(0, 122, 255, 0.2);
+  box-shadow: none;
 }
 
 .danger-button svg,
@@ -1266,10 +1284,11 @@ button:disabled {
 }
 
 .quiet {
-  width: 30px;
-  height: 30px;
-  color: #1769e0;
-  background: #e8f1ff;
+  width: 32px;
+  height: 32px;
+  color: var(--accent-blue);
+  background: rgba(0, 122, 255, 0.1);
+  box-shadow: none;
 }
 
 .shortcut-title {
@@ -1288,13 +1307,15 @@ pre {
   overflow: auto;
   max-height: 112px;
   margin: 0;
-  padding: 10px;
-  border-radius: 7px;
-  color: #e5e7eb;
-  background: #111827;
+  padding: 12px;
+  border-radius: var(--glass-radius-small);
+  color: #f5f5f7;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
   font-size: 12px;
-  line-height: 18px;
+  line-height: 1.5;
   white-space: pre-wrap;
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .steps {

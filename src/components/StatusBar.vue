@@ -73,15 +73,16 @@ const emit = defineEmits<{
 
 .status-item {
   min-width: 0;
-  min-height: 40px;
+  min-height: 42px;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
-  border: 1px solid rgba(28, 39, 54, 0.09);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.76);
-  box-shadow: 0 10px 24px rgba(28, 39, 54, 0.06);
+  padding: 6px 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--glass-radius-small);
+  background: var(--glass-bg-medium);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shadow);
 }
 
 .status-item > div {
@@ -90,75 +91,72 @@ const emit = defineEmits<{
 
 .receiver-button {
   justify-content: center;
-  border-color: rgba(32, 180, 134, 0.42);
-  color: #0b7a56;
-  background: rgba(32, 180, 134, 0.12);
+  border-color: rgba(52, 199, 89, 0.4);
+  color: #248a3d;
+  background: rgba(52, 199, 89, 0.15);
   cursor: pointer;
   font: inherit;
   text-align: center;
 }
 
 .receiver-button strong {
-  color: #0b7a56;
+  color: #248a3d;
   font-size: 16px;
 }
 
 .receiver-button:hover {
-  border-color: rgba(32, 180, 134, 0.7);
-  background: rgba(32, 180, 134, 0.18);
-  box-shadow:
-    0 0 0 3px rgba(32, 180, 134, 0.12),
-    0 12px 24px rgba(32, 180, 134, 0.12);
+  border-color: rgba(52, 199, 89, 0.6);
+  background: rgba(52, 199, 89, 0.25);
+  box-shadow: 0 8px 24px rgba(52, 199, 89, 0.2);
 }
 
 .receiver-button.stopped {
-  border-color: rgba(102, 112, 133, 0.28);
-  color: #667085;
-  background: #f2f4f7;
+  border-color: var(--glass-border-light);
+  color: var(--text-secondary);
+  background: var(--glass-bg-light);
 }
 
 .receiver-button.stopped strong {
-  color: #667085;
+  color: var(--text-secondary);
 }
 
 .status-action {
   width: 100%;
-  border: 1px solid rgba(28, 39, 54, 0.09);
+  border: 1px solid var(--glass-border);
   color: inherit;
   cursor: pointer;
   font: inherit;
   text-align: left;
   transition:
-    border-color 0.16s ease,
-    box-shadow 0.16s ease,
-    transform 0.16s ease,
-    background-color 0.16s ease;
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s cubic-bezier(0.25, 1, 0.5, 1),
+    background-color 0.2s ease;
 }
 
 .status-action:disabled {
   cursor: default;
+  opacity: 0.7;
 }
 
 .status-action:not(:disabled):hover {
-  border-color: rgba(23, 105, 224, 0.58);
-  background: #f4f8ff;
-  box-shadow:
-    0 0 0 3px rgba(23, 105, 224, 0.1),
-    0 14px 28px rgba(23, 105, 224, 0.16);
+  border-color: var(--accent-blue);
+  background: rgba(0, 122, 255, 0.08);
+  box-shadow: 0 8px 24px rgba(0, 122, 255, 0.12);
   transform: translateY(-1px);
 }
 
 .status-action:not(:disabled):hover .status-label {
-  color: #1769e0;
+  color: var(--accent-blue);
 }
 
 .status-action:not(:disabled):hover strong {
-  color: #0f4fb5;
+  color: var(--accent-blue-hover);
 }
 
 .status-label {
   margin: 0 0 1px;
-  color: #667085;
+  color: var(--text-secondary);
   font-size: 12px;
 }
 
@@ -166,9 +164,10 @@ strong {
   display: block;
   min-width: 0;
   overflow: hidden;
-  color: #17202f;
+  color: var(--text-primary);
   font-size: 15px;
   line-height: 19px;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -184,15 +183,21 @@ strong {
 .refresh-icon-button {
   width: 42px;
   min-width: 0;
-  min-height: 40px;
+  min-height: 42px;
   display: grid;
   place-items: center;
-  border: 1px solid rgba(28, 39, 54, 0.09);
-  border-radius: 8px;
-  color: #1769e0;
-  background: #e8f1ff;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--glass-radius-small);
+  color: var(--accent-blue);
+  background: var(--glass-bg-medium);
+  backdrop-filter: var(--glass-blur);
   cursor: pointer;
-  box-shadow: 0 10px 24px rgba(28, 39, 54, 0.06);
+  box-shadow: var(--glass-shadow);
+}
+
+.refresh-icon-button:hover {
+  background: var(--glass-bg-heavy);
+  box-shadow: var(--glass-shadow-heavy);
 }
 
 .refresh-icon-button svg {

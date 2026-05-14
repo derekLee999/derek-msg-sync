@@ -123,11 +123,12 @@ function highlightText(message: IncomingMessage) {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  padding: 14px;
-  border: 1px solid rgba(28, 39, 54, 0.09);
-  border-radius: 8px;
-  background: #ffffff;
-  box-shadow: 0 18px 48px rgba(28, 39, 54, 0.08);
+  padding: 16px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--glass-radius-large);
+  background: var(--glass-bg-medium);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shadow-heavy);
 }
 
 .panel-head {
@@ -140,9 +141,11 @@ function highlightText(message: IncomingMessage) {
 
 .panel-title {
   margin: 0;
-  color: #17202f;
+  color: var(--text-primary);
   font-size: 18px;
   line-height: 24px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
 }
 
 .panel-title span {
@@ -153,10 +156,10 @@ function highlightText(message: IncomingMessage) {
   margin-left: 6px;
   padding: 0 7px;
   border-radius: 999px;
-  color: #1769e0;
-  background: #e8f1ff;
+  color: var(--accent-blue);
+  background: rgba(0, 122, 255, 0.1);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 700;
   vertical-align: 2px;
 }
 
@@ -169,17 +172,21 @@ function highlightText(message: IncomingMessage) {
 button {
   height: 34px;
   border: 0;
-  border-radius: 7px;
-  color: #1769e0;
-  background: #e8f1ff;
+  border-radius: var(--glass-radius-small);
+  color: var(--text-primary);
+  background: var(--glass-bg-heavy);
   cursor: pointer;
   font: inherit;
+  font-weight: 500;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 }
 
 button:disabled {
-  color: #98a2b3;
-  background: #eef1f5;
+  color: var(--text-secondary);
+  background: var(--glass-bg-light);
   cursor: default;
+  opacity: 0.5;
+  box-shadow: none;
 }
 
 .panel-head button {
@@ -192,9 +199,9 @@ button:disabled {
   align-items: center;
   justify-content: center;
   gap: 5px;
-  color: #465160;
-  background: #eef1f5;
-  font-weight: 700;
+  color: var(--text-secondary);
+  background: var(--glass-bg-heavy);
+  font-weight: 600;
 }
 
 .filter-toggle svg {
@@ -209,13 +216,13 @@ button:disabled {
 }
 
 .filter-toggle:hover {
-  color: #1769e0;
-  background: #e8f1ff;
+  color: var(--accent-blue);
 }
 
 .filter-toggle.active {
   color: #ffffff;
-  background: #1769e0;
+  background: var(--accent-gradient);
+  border: 0;
 }
 
 .empty-state {
@@ -223,13 +230,14 @@ button:disabled {
   display: grid;
   place-content: center;
   gap: 8px;
-  color: #667085;
+  color: var(--text-secondary);
   text-align: center;
 }
 
 .empty-state strong {
-  color: #17202f;
+  color: var(--text-primary);
   font-size: 18px;
+  font-weight: 600;
 }
 
 .message-list {
@@ -245,11 +253,13 @@ button:disabled {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(116px, 150px);
   align-items: stretch;
-  gap: 8px;
-  padding: 8px 10px;
-  border: 1px solid #e7ebf1;
-  border-radius: 8px;
-  background: #fbfcfe;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--glass-radius-medium);
+  background: var(--glass-bg-heavy);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
 }
 
 .message-item.plain {
@@ -267,28 +277,28 @@ button:disabled {
 }
 
 .meta-row {
-  color: #667085;
+  color: var(--text-secondary);
   font-size: 12px;
 }
 
 .message-text {
   display: -webkit-box;
   overflow: hidden;
-  margin: 0 0 5px;
-  color: #17202f;
+  margin: 0 0 6px;
+  color: var(--text-primary);
   font-size: 15px;
-  font-weight: 650;
-  line-height: 20px;
+  font-weight: 600;
+  line-height: 1.4;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
 
 .message-text mark {
-  padding: 1px 4px;
-  border-radius: 5px;
-  color: #0f4fb5;
-  background: #dbeafe;
-  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 6px;
+  color: var(--accent-blue-hover);
+  background: rgba(0, 122, 255, 0.15);
+  font-weight: 700;
 }
 
 .meta-row span {
@@ -300,30 +310,28 @@ button:disabled {
 .code-button {
   width: 100%;
   height: auto;
-  min-height: 46px;
+  min-height: 48px;
   padding: 6px 8px;
-  border: 1px solid rgba(23, 105, 224, 0.12);
+  border: 0;
+  border-radius: var(--glass-radius-small);
   color: #ffffff;
-  background: #1769e0;
-  box-shadow: 0 8px 18px rgba(23, 105, 224, 0.18);
+  background: var(--accent-gradient);
+  box-shadow: 0 8px 24px rgba(0, 122, 255, 0.3);
   transition:
-    background 140ms ease,
-    border-color 140ms ease,
-    box-shadow 140ms ease,
-    transform 140ms ease;
+    background 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s cubic-bezier(0.25, 1, 0.5, 1);
 }
 
 .code-button:hover {
-  border-color: rgba(23, 105, 224, 0.34);
-  background: #0f57c4;
-  box-shadow: 0 12px 24px rgba(23, 105, 224, 0.28);
-  transform: translateY(-1px);
+  filter: brightness(1.1);
+  box-shadow: 0 12px 32px rgba(0, 122, 255, 0.4);
+  transform: translateY(-2px) scale(1.02);
 }
 
 .code-button:active {
-  background: #0d4cab;
-  box-shadow: 0 6px 14px rgba(23, 105, 224, 0.2);
-  transform: translateY(0);
+  box-shadow: 0 4px 16px rgba(0, 122, 255, 0.2);
+  transform: translateY(0) scale(0.98);
 }
 
 .code-button:focus-visible {
@@ -334,12 +342,13 @@ button:disabled {
 .code-button span {
   display: block;
   overflow: hidden;
-  font-size: 17px;
-  font-weight: 800;
-  line-height: 22px;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  line-height: 24px;
   text-overflow: ellipsis;
   white-space: nowrap;
-  transition: transform 140ms ease;
+  transition: transform 0.2s ease;
 }
 
 .code-button:hover span {

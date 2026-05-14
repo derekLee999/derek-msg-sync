@@ -41,16 +41,18 @@ const emit = defineEmits<{
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgba(15, 23, 42, 0.36);
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(12px);
 }
 
 .confirm-dialog {
   width: min(420px, calc(100vw - 48px));
   overflow: hidden;
-  border: 1px solid rgba(28, 39, 54, 0.1);
-  border-radius: 10px;
-  background: #ffffff;
-  box-shadow: 0 24px 70px rgba(28, 39, 54, 0.26);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--glass-radius-large);
+  background: var(--glass-bg-heavy);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shadow-heavy);
 }
 
 .confirm-body {
@@ -59,16 +61,17 @@ const emit = defineEmits<{
 
 .confirm-title {
   margin: 0 0 12px;
-  color: #17202f;
+  color: var(--text-primary);
   font-size: 20px;
   line-height: 28px;
+  font-weight: 600;
 }
 
 .confirm-message {
   margin: 0;
-  color: #465160;
+  color: var(--text-secondary);
   font-size: 15px;
-  line-height: 24px;
+  line-height: 1.5;
 }
 
 .confirm-actions {
@@ -81,45 +84,45 @@ const emit = defineEmits<{
 .confirm-button {
   min-width: 86px;
   height: 38px;
-  border-radius: 8px;
+  border-radius: var(--glass-radius-small);
   cursor: pointer;
   font: inherit;
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 600;
   transition:
-    background 140ms ease,
-    border-color 140ms ease,
-    box-shadow 140ms ease,
-    transform 140ms ease;
+    background 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s cubic-bezier(0.25, 1, 0.5, 1);
 }
 
 .confirm-button:hover {
-  transform: translateY(-1px);
+  transform: translateY(-1px) scale(1.02);
 }
 
 .confirm-button:active {
-  transform: translateY(0);
+  transform: translateY(0) scale(0.98);
 }
 
 .confirm-button.primary {
-  border: 1px solid #1769e0;
+  border: 0;
   color: #ffffff;
-  background: #1769e0;
-  box-shadow: 0 10px 22px rgba(23, 105, 224, 0.24);
+  background: var(--accent-gradient);
+  box-shadow: 0 4px 16px rgba(0, 122, 255, 0.25);
 }
 
 .confirm-button.primary:hover {
-  background: #0f57c4;
+  filter: brightness(1.1);
+  box-shadow: 0 8px 24px rgba(0, 122, 255, 0.35);
 }
 
 .confirm-button.secondary {
-  border: 1px solid #d0d5dd;
-  color: #17202f;
-  background: #ffffff;
+  border: 1px solid var(--glass-border);
+  color: var(--text-primary);
+  background: var(--glass-bg-medium);
 }
 
 .confirm-button.secondary:hover {
-  border-color: #b8c1cc;
-  background: #f6f8fb;
+  background: var(--glass-bg-heavy);
 }
 </style>
