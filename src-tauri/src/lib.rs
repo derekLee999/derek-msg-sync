@@ -21,6 +21,7 @@ use tauri::{
 };
 use tiny_http::{Header, Method, Response, Server, StatusCode};
 use uuid::Uuid;
+#[cfg(windows)]
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
     KEYEVENTF_UNICODE, VIRTUAL_KEY,
@@ -1314,6 +1315,7 @@ fn default_notification_position() -> NotificationPosition {
     NotificationPosition::BottomRight
 }
 
+#[cfg(windows)]
 fn type_text(text: &str) -> Result<(), String> {
     if text.is_empty() {
         return Ok(());
@@ -1337,6 +1339,15 @@ fn type_text(text: &str) -> Result<(), String> {
     }
 }
 
+#[cfg(not(windows))]
+fn type_text(text: &str) -> Result<(), String> {
+    if text.is_empty() {
+        return Ok(());
+    }
+    Err("直接输入仅支持 Windows".to_string())
+}
+
+#[cfg(windows)]
 fn unicode_input(unit: u16, flags: KEYBD_EVENT_FLAGS) -> INPUT {
     INPUT {
         r#type: INPUT_KEYBOARD,
