@@ -1823,12 +1823,6 @@ fn restore_macos_app_icon(app: &AppHandle) {
 fn restore_macos_app_icon(_app: &AppHandle) {
 }
 
-fn hide_main_window(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.hide();
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
