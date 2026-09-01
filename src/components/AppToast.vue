@@ -37,22 +37,26 @@ defineProps<{
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 9px 12px;
-  border: 1px solid rgba(28, 39, 54, 0.12);
-  border-radius: 8px;
-  color: #17202f;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 18px 42px rgba(28, 39, 54, 0.18);
-  font-size: 13px;
-  font-weight: 700;
+  gap: 10px;
+  padding: 10px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 999px;
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.25);
+  background-image: linear-gradient(135deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0.1) 100%);
+  backdrop-filter: blur(24px) saturate(150%);
+  box-shadow: 
+    0 8px 32px rgba(0, 0, 0, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .toast-item svg {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   flex: 0 0 auto;
-  color: #19b987;
+  color: #34c759;
   fill: none;
   stroke: currentColor;
   stroke-width: 2.5;

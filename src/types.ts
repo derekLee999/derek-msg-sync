@@ -38,3 +38,9 @@ export interface RelaySettings {
   baseUrl: string
   secret: string
 }
+
+export interface PlatformInfo {
+  os: string
+  isMacos: boolean
+  isWindows: boolean
+}

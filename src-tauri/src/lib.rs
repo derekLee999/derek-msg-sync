@@ -12,6 +12,10 @@ use std::{
     thread,
     time::Duration,
 };
+#[cfg(target_os = "macos")]
+use tauri::menu::{PredefinedMenuItem, Submenu};
+#[cfg(target_os = "macos")]
+use tauri::TitleBarStyle;
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
@@ -21,11 +25,17 @@ use tauri::{
 };
 use tiny_http::{Header, Method, Response, Server, StatusCode};
 use uuid::Uuid;
-#[cfg(windows)]
+#[cfg(target_os = "windows")]
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
     KEYEVENTF_UNICODE, VIRTUAL_KEY,
 };
+
+#[cfg(target_os = "macos")]
+#[link(name = "ApplicationServices", kind = "framework")]
+extern "C" {
+    fn AXIsProcessTrusted() -> std::ffi::c_uchar;
+}
 
 const DEFAULT_SERVER_PORT: u16 = 17866;
 const DEFAULT_DEVICE_ID: &str = "default-iphone";
@@ -35,6 +45,7 @@ const MAX_SENDER_DEVICES: usize = 5;
 const MAX_MESSAGES: usize = 100;
 const MAX_LOG_FILE_BYTES: u64 = 5 * 1024 * 1024;
 const TRAY_EXIT_ID: &str = "quit";
+const MENU_SETTINGS_ID: &str = "open-settings";
 const NOTIFICATION_LABEL: &str = "message-toast";
 const NOTIFICATION_WIDTH: f64 = 380.0;
 const NOTIFICATION_HEIGHT: f64 = 116.0;
@@ -126,6 +137,14 @@ struct RelayMessage {
 struct RelayPollResponse {
     #[serde(default)]
     messages: Vec<RelayMessage>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlatformInfo {
+    os: &'static str,
+    is_macos: bool,
+    is_windows: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -280,7 +299,30 @@ fn receiver_status(state: State<'_, Arc<AppState>>) -> ReceiverStatus {
 }
 
 #[tauri::command]
-fn set_notification_mode(mode: NotificationMode, state: State<'_, Arc<AppState>>) -> Result<(), String> {
+fn platform_info() -> PlatformInfo {
+    PlatformInfo {
+        os: std::env::consts::OS,
+        is_macos: cfg!(target_os = "macos"),
+        is_windows: cfg!(target_os = "windows"),
+    }
+}
+
+#[tauri::command]
+fn open_settings(app: AppHandle) {
+    show_main_window(&app);
+    let _ = app.emit("open-settings", ());
+}
+
+#[tauri::command]
+fn hide_main_window_command(app: AppHandle) {
+    hide_main_window(&app);
+}
+
+#[tauri::command]
+fn set_notification_mode(
+    mode: NotificationMode,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
     let state = state.inner().clone();
     *state
         .notification_mode
@@ -304,6 +346,10 @@ fn set_notification_position(
 
 #[tauri::command]
 fn set_direct_paste_enabled(enabled: bool, state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    if enabled {
+        ensure_direct_paste_permission()?;
+    }
+
     let state = state.inner().clone();
     *state
         .direct_paste_enabled
@@ -735,11 +781,15 @@ fn stop_relay_client(state: &Arc<AppState>) -> Result<(), String> {
 
 fn relay_poll_loop(app: AppHandle, state: Arc<AppState>) {
     let relay = current_relay_settings(&state);
-    write_log(&state, "BACKEND", &format!(
-        "云端轮询启动: base_url={}, secret_len={}",
-        relay.base_url,
-        relay.secret.len()
-    ));
+    write_log(
+        &state,
+        "BACKEND",
+        &format!(
+            "云端轮询启动: base_url={}, secret_len={}",
+            relay.base_url,
+            relay.secret.len()
+        ),
+    );
 
     let client = match Client::builder().timeout(Duration::from_secs(35)).build() {
         Ok(client) => client,
@@ -772,18 +822,28 @@ fn relay_poll_loop(app: AppHandle, state: Arc<AppState>) {
         match request.send() {
             Ok(response) => {
                 let status = response.status();
-                write_log(&state, "BACKEND", &format!("收到响应: HTTP {}", status.as_u16()));
+                write_log(
+                    &state,
+                    "BACKEND",
+                    &format!("收到响应: HTTP {}", status.as_u16()),
+                );
 
                 if status.is_success() {
                     match response.text() {
                         Ok(body) => {
-                            write_log(&state, "BACKEND", &format!("响应体 (前500字符): {}", 
-                                &body[..body.len().min(500)]));
+                            write_log(
+                                &state,
+                                "BACKEND",
+                                &format!("响应体 (前500字符): {}", &body[..body.len().min(500)]),
+                            );
                             match serde_json::from_str::<RelayPollResponse>(&body) {
                                 Ok(payload) => {
                                     consecutive_errors = 0;
-                                    write_log(&state, "BACKEND", &format!(
-                                        "解析成功, 消息数: {}", payload.messages.len()));
+                                    write_log(
+                                        &state,
+                                        "BACKEND",
+                                        &format!("解析成功, 消息数: {}", payload.messages.len()),
+                                    );
                                     for relay_message in payload.messages {
                                         if !relay_is_running(&state) {
                                             break;
@@ -798,18 +858,30 @@ fn relay_poll_loop(app: AppHandle, state: Arc<AppState>) {
                                             relay_message.remote_addr,
                                         ));
                                         after = relay_message.received_at.clone();
-                                        if let Some(message) = message_from_relay(relay_message, &state) {
+                                        if let Some(message) =
+                                            message_from_relay(relay_message, &state)
+                                        {
                                             write_log(&state, "BACKEND", "消息已存储并发送到前端");
                                             store_message(&app, &state, message);
                                         } else {
-                                            write_log(&state, "BACKEND", "消息被过滤: 设备ID未匹配");
+                                            write_log(
+                                                &state,
+                                                "BACKEND",
+                                                "消息被过滤: 设备ID未匹配",
+                                            );
                                         }
                                     }
                                 }
                                 Err(error) => {
                                     consecutive_errors += 1;
-                                    write_log(&state, "BACKEND", &format!(
-                                        "JSON解析失败(连续{}次): {} | 原始响应体: {}", consecutive_errors, error, body));
+                                    write_log(
+                                        &state,
+                                        "BACKEND",
+                                        &format!(
+                                            "JSON解析失败(连续{}次): {} | 原始响应体: {}",
+                                            consecutive_errors, error, body
+                                        ),
+                                    );
                                     emit_relay_error_if_needed(
                                         &app,
                                         consecutive_errors,
@@ -821,8 +893,11 @@ fn relay_poll_loop(app: AppHandle, state: Arc<AppState>) {
                         }
                         Err(error) => {
                             consecutive_errors += 1;
-                            write_log(&state, "BACKEND", &format!(
-                                "读取响应体失败(连续{}次): {}", consecutive_errors, error));
+                            write_log(
+                                &state,
+                                "BACKEND",
+                                &format!("读取响应体失败(连续{}次): {}", consecutive_errors, error),
+                            );
                             emit_relay_error_if_needed(
                                 &app,
                                 consecutive_errors,
@@ -833,8 +908,15 @@ fn relay_poll_loop(app: AppHandle, state: Arc<AppState>) {
                     }
                 } else {
                     consecutive_errors += 1;
-                    write_log(&state, "BACKEND", &format!(
-                        "HTTP错误(连续{}次): {}", consecutive_errors, status.as_u16()));
+                    write_log(
+                        &state,
+                        "BACKEND",
+                        &format!(
+                            "HTTP错误(连续{}次): {}",
+                            consecutive_errors,
+                            status.as_u16()
+                        ),
+                    );
                     emit_relay_error_if_needed(
                         &app,
                         consecutive_errors,
@@ -845,8 +927,11 @@ fn relay_poll_loop(app: AppHandle, state: Arc<AppState>) {
             }
             Err(error) => {
                 consecutive_errors += 1;
-                write_log(&state, "BACKEND", &format!(
-                    "网络请求失败(连续{}次): {}", consecutive_errors, error));
+                write_log(
+                    &state,
+                    "BACKEND",
+                    &format!("网络请求失败(连续{}次): {}", consecutive_errors, error),
+                );
                 if relay_is_running(&state) {
                     emit_relay_error_if_needed(
                         &app,
@@ -957,19 +1042,54 @@ fn receiver_is_running(state: &Arc<AppState>) -> bool {
 }
 
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
+    let tray_settings = MenuItem::with_id(app, MENU_SETTINGS_ID, "设置...", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, TRAY_EXIT_ID, "退出程序", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&quit])?;
+    let menu = Menu::with_items(app, &[&tray_settings, &quit])?;
+    #[cfg(target_os = "macos")]
+    let icon = Image::from_bytes(include_bytes!("../icons/menu.png"))?;
+    #[cfg(not(target_os = "macos"))]
     let icon = Image::from_bytes(include_bytes!("../icons/icon.ico"))?;
+
+    #[cfg(target_os = "macos")]
+    {
+        let menu_settings =
+            MenuItem::with_id(app, MENU_SETTINGS_ID, "设置...", true, Some("CmdOrCtrl+,"))?;
+        let menu_quit =
+            MenuItem::with_id(app, TRAY_EXIT_ID, "退出程序", true, Some("CmdOrCtrl+Q"))?;
+        let app_menu =
+            Submenu::with_items(app, "验证码接收器", true, &[&menu_settings, &menu_quit])?;
+        let edit_menu = Submenu::with_items(
+            app,
+            "Edit",
+            true,
+            &[
+                &PredefinedMenuItem::undo(app, None)?,
+                &PredefinedMenuItem::redo(app, None)?,
+                &PredefinedMenuItem::separator(app)?,
+                &PredefinedMenuItem::cut(app, None)?,
+                &PredefinedMenuItem::copy(app, None)?,
+                &PredefinedMenuItem::paste(app, None)?,
+                &PredefinedMenuItem::select_all(app, None)?,
+            ],
+        )?;
+        let main_menu = Menu::with_items(app, &[&app_menu, &edit_menu])?;
+        app.set_menu(main_menu)?;
+    }
 
     TrayIconBuilder::new()
         .icon(icon)
         .tooltip("验证码接收器")
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| {
-            if event.id().as_ref() == TRAY_EXIT_ID {
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            MENU_SETTINGS_ID => {
+                let _ = app.emit("open-settings", ());
+                show_main_window(app);
+            }
+            TRAY_EXIT_ID => {
                 app.exit(0);
             }
+            _ => {}
         })
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click {
@@ -979,11 +1099,7 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
             } = event
             {
                 let app = tray.app_handle();
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.unminimize();
-                    let _ = window.set_focus();
-                }
+                show_main_window(app);
             }
         })
         .build(app)?;
@@ -1147,11 +1263,14 @@ fn store_message(app: &AppHandle, state: &Arc<AppState>, message: IncomingMessag
 fn show_message_notification(
     app: &AppHandle,
     message: &IncomingMessage,
-    position: NotificationPosition,
+    mut position: NotificationPosition,
 ) {
     let app_for_thread = app.clone();
     let app = app.clone();
     let message = message.clone();
+    if cfg!(target_os = "macos") {
+        position = NotificationPosition::TopRight;
+    }
 
     let _ = app_for_thread.run_on_main_thread(move || {
         let window = match ensure_notification_window(&app) {
@@ -1178,7 +1297,7 @@ fn ensure_notification_window(app: &AppHandle) -> tauri::Result<tauri::WebviewWi
         return Ok(window);
     }
 
-    WebviewWindowBuilder::new(
+    let builder = WebviewWindowBuilder::new(
         app,
         NOTIFICATION_LABEL,
         WebviewUrl::App("index.html".into()),
@@ -1186,13 +1305,17 @@ fn ensure_notification_window(app: &AppHandle) -> tauri::Result<tauri::WebviewWi
     .title("验证码接收器")
     .inner_size(NOTIFICATION_WIDTH, NOTIFICATION_HEIGHT)
     .resizable(false)
-    .decorations(false)
-    .transparent(true)
-    .always_on_top(true)
-    .skip_taskbar(true)
-    .focused(false)
-    .visible(false)
-    .build()
+    .decorations(false);
+
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.transparent(true);
+
+    builder
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .focused(false)
+        .visible(false)
+        .build()
 }
 
 fn position_notification_window(
@@ -1315,7 +1438,42 @@ fn default_notification_position() -> NotificationPosition {
     NotificationPosition::BottomRight
 }
 
-#[cfg(windows)]
+#[cfg(target_os = "macos")]
+fn ensure_direct_paste_permission() -> Result<(), String> {
+    if macos_accessibility_permission_granted() {
+        return Ok(());
+    }
+
+    open_macos_accessibility_settings();
+    Err("请在系统设置中为验证码接收器开启辅助功能权限后，再启用直接输入".to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn ensure_direct_paste_permission() -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn macos_accessibility_permission_granted() -> bool {
+    unsafe { AXIsProcessTrusted() != 0 }
+}
+
+#[cfg(target_os = "macos")]
+fn open_macos_accessibility_settings() {
+    let opened = std::process::Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
+
+    if !opened {
+        let _ = std::process::Command::new("open")
+            .arg("/System/Library/PreferencePanes/Security.prefPane")
+            .status();
+    }
+}
+
+#[cfg(target_os = "windows")]
 fn type_text(text: &str) -> Result<(), String> {
     if text.is_empty() {
         return Ok(());
@@ -1339,15 +1497,33 @@ fn type_text(text: &str) -> Result<(), String> {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
 fn type_text(text: &str) -> Result<(), String> {
     if text.is_empty() {
         return Ok(());
     }
-    Err("直接输入仅支持 Windows".to_string())
+
+    let status = std::process::Command::new("osascript")
+        .args([
+            "-e",
+            r#"tell application "System Events" to keystroke "v" using command down"#,
+        ])
+        .status()
+        .map_err(|error| format!("执行 Command+V 失败: {}", error))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err("执行 Command+V 失败，请检查辅助功能权限".to_string())
+    }
 }
 
-#[cfg(windows)]
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+fn type_text(_text: &str) -> Result<(), String> {
+    Err("当前平台暂不支持直接输入".to_string())
+}
+
+#[cfg(target_os = "windows")]
 fn unicode_input(unit: u16, flags: KEYBD_EVENT_FLAGS) -> INPUT {
     INPUT {
         r#type: INPUT_KEYBOARD,
@@ -1546,11 +1722,16 @@ pub fn run() {
                 let _ = app.emit("receiver-error", format!("通知窗口初始化失败: {}", error));
             }
             if let Some(window) = app.get_webview_window("main") {
-                let window_for_close = window.clone();
+                #[cfg(target_os = "macos")]
+                {
+                    let _ = window.set_decorations(true);
+                    let _ = window.set_title_bar_style(TitleBarStyle::Overlay);
+                }
+                let app_for_close = app.handle().clone();
                 window.on_window_event(move |event| {
                     if let WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
-                        let _ = window_for_close.hide();
+                        hide_main_window(&app_for_close);
                     }
                 });
             }
@@ -1573,6 +1754,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_messages,
             clear_messages,
+            platform_info,
+            open_settings,
+            hide_main_window_command,
             receiver_status,
             set_notification_mode,
             set_notification_position,
@@ -1591,11 +1775,52 @@ pub fn run() {
 }
 
 fn show_main_window(app: &AppHandle) {
+    restore_macos_app_icon(app);
+
+    #[cfg(target_os = "macos")]
+    let _ = app.set_dock_visibility(true);
+
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
         let _ = window.unminimize();
+        let _ = window.show();
         let _ = window.set_focus();
     }
+
+    restore_macos_app_icon(app);
+}
+
+fn hide_main_window(app: &AppHandle) {
+    restore_macos_app_icon(app);
+
+    #[cfg(target_os = "macos")]
+    let _ = app.set_dock_visibility(false);
+
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn restore_macos_app_icon(app: &AppHandle) {
+    let _ = app.run_on_main_thread(|| {
+        use objc2::{AllocAnyThread, MainThreadMarker};
+        use objc2_app_kit::{NSApplication, NSImage};
+        use objc2_foundation::NSData;
+
+        let mtm = unsafe { MainThreadMarker::new_unchecked() };
+        let ns_app = NSApplication::sharedApplication(mtm);
+        let icon_data = NSData::with_bytes(include_bytes!("../icons/icon.png"));
+
+        if let Some(icon) = NSImage::initWithData(NSImage::alloc(), &icon_data) {
+            unsafe {
+                ns_app.setApplicationIconImage(Some(&icon));
+            }
+        }
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+fn restore_macos_app_icon(_app: &AppHandle) {
 }
 
 fn hide_main_window(app: &AppHandle) {

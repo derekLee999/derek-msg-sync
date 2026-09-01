@@ -129,33 +129,51 @@ onUnmounted(() => {
   min-height: 116px;
   display: block;
   padding: 16px 42px 16px 16px;
-  border: 1px solid rgba(28, 39, 54, 0.12);
-  border-radius: 8px;
-  color: #17202f;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow:
-    0 18px 46px rgba(28, 39, 54, 0.22),
-    0 2px 8px rgba(28, 39, 54, 0.1);
+  border-radius: var(--glass-radius-large);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  color: var(--text-primary);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.16);
+  z-index: 1; /* Create stacking context for ::before */
+}
+
+.notification-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  
+  /* 终极修复 Chromium 下 backdrop-filter 圆角溢出导致的四个角背景突出 Bug */
+  -webkit-mask-image: -webkit-radial-gradient(white, black);
+  mask-image: radial-gradient(white, black);
+  overflow: hidden;
+  
+  background: rgba(255, 255, 255, 0.7);
+  background-image: linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0.4) 100%);
+  backdrop-filter: blur(32px) saturate(180%);
+  box-shadow: 
+    inset 0 1px 0 rgba(255, 255, 255, 0.8),
+    inset 1px 0 0 rgba(255, 255, 255, 0.4);
 }
 
 .close-button {
   position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 26px;
-  height: 26px;
+  top: 10px;
+  right: 10px;
+  width: 28px;
+  height: 28px;
   display: grid;
   place-items: center;
   border: 0;
-  border-radius: 6px;
-  color: #667085;
-  background: transparent;
+  border-radius: var(--glass-radius-small);
+  color: var(--text-secondary);
+  background: var(--glass-bg-light);
   cursor: pointer;
 }
 
 .close-button:hover {
-  color: #17202f;
-  background: #eef3f8;
+  color: var(--text-primary);
+  background: var(--glass-bg-medium);
 }
 
 .close-button svg {
@@ -192,38 +210,58 @@ onUnmounted(() => {
 
 .notification-title strong {
   overflow: hidden;
-  color: #17202f;
-  font-size: 13px;
+  color: #1e293b;
+  font-size: 14px;
+  font-weight: 700;
   line-height: 18px;
+  letter-spacing: 0.3px;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.8);
 }
 
 .notification-head span {
   flex: 0 0 auto;
-  color: #667085;
+  color: #475569;
   font-size: 12px;
+  font-weight: 500;
+  text-shadow: 0 1px 1px rgba(255, 255, 255, 0.6);
 }
 
 .notification-text {
-  margin: 10px 0 3px;
-  color: #17202f;
+  margin: 10px 0 6px;
+  color: #0f172a;
   font-size: 18px;
   font-weight: 800;
   line-height: 24px;
+  letter-spacing: 0.2px;
+  text-shadow: 0 2px 4px rgba(255, 255, 255, 0.8);
 }
 
 .code-text {
-  color: #1769e0;
+  display: inline-block;
+  color: #0066cc;
+  background: rgba(0, 102, 204, 0.12);
+  border: 1px solid rgba(0, 102, 204, 0.2);
+  padding: 2px 10px;
+  border-radius: 8px;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  vertical-align: bottom;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  text-shadow: none;
 }
 
 .notification-message {
   display: -webkit-box;
   overflow: hidden;
   margin: 0;
-  color: #465160;
-  font-size: 12px;
-  line-height: 17px;
+  color: #334155;
+  font-size: 13px;
+  line-height: 1.5;
+  font-weight: 500;
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.6);
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }

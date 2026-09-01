@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { shallowRef } from 'vue'
+import { computed, onMounted, onUnmounted, shallowRef } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import AppConfirmDialog from './components/AppConfirmDialog.vue'
 import AppToast from './components/AppToast.vue'
@@ -8,7 +10,7 @@ import SetupPanel from './components/SetupPanel.vue'
 import StatusBar from './components/StatusBar.vue'
 import { useMessages } from './composables/useMessages'
 import { useToast } from './composables/useToast'
-import type { NotificationMode, NotificationPosition } from './types'
+import type { NotificationMode, NotificationPosition, PlatformInfo } from './types'
 
 const {
   visibleMessages,
@@ -42,10 +44,13 @@ const {
 const { toastItems, showToast } = useToast()
 const setupOpen = shallowRef(false)
 const alwaysOnTop = shallowRef(false)
+const platform = shallowRef<PlatformInfo | null>(null)
 const activeConfirm = shallowRef<'stopReceiver' | 'clearMessages' | 'restartPort' | null>(null)
 const pendingPort = shallowRef<number | null>(null)
 const appWindow = getCurrentWindow()
 let resolveStopConfirm: ((confirmed: boolean) => void) | null = null
+let unlistenOpenSettings: UnlistenFn | null = null
+const isMacos = computed(() => platform.value?.isMacos ?? false)
 
 async function startDrag(event: MouseEvent) {
   if ((event.target as HTMLElement).closest('button')) {
@@ -65,7 +70,12 @@ async function minimizeWindow() {
 }
 
 async function hideWindow() {
-  await appWindow.hide()
+  await invoke('hide_main_window_command')
+}
+
+async function loadPlatform() {
+  platform.value = await invoke<PlatformInfo>('platform_info')
+  document.body.classList.toggle('macos', platform.value.isMacos)
 }
 
 async function handleCopyLocalIp() {
@@ -171,8 +181,8 @@ async function handleDirectPasteChange(enabled: boolean) {
   try {
     await setDirectPasteEnabled(enabled)
     showToast(enabled ? '直接输入已开启' : '直接输入已关闭')
-  } catch {
-    showToast('直接输入设置保存失败')
+  } catch (cause) {
+    showToast(String(cause) || '直接输入设置保存失败')
   }
 }
 
@@ -201,12 +211,24 @@ async function handleRelayConnectionTest(relay: { enabled: boolean; baseUrl: str
     showToast('云端服务连接失败')
   }
 }
+
+onMounted(async () => {
+  await loadPlatform()
+  unlistenOpenSettings = await listen('open-settings', () => {
+    setupOpen.value = true
+  })
+})
+
+onUnmounted(() => {
+  unlistenOpenSettings?.()
+  document.body.classList.remove('macos')
+})
 </script>
 
 <template>
   <div class="window-frame">
-    <header class="titlebar" @mousedown="startDrag">
-      <div class="titlebar-title">
+    <header :class="['titlebar', { macos: isMacos }]" @mousedown="startDrag">
+      <div v-if="!isMacos" class="titlebar-title">
         <img class="titlebar-app-icon" src="/app-icon.png" alt="" aria-hidden="true" />
         <span>验证码接收器</span>
         <button type="button" class="titlebar-icon" title="接入设置" @click="setupOpen = true">
@@ -216,7 +238,7 @@ async function handleRelayConnectionTest(relay: { enabled: boolean; baseUrl: str
           </svg>
         </button>
       </div>
-      <div class="window-controls">
+      <div v-if="!isMacos" class="window-controls">
         <button
           type="button"
           :class="['titlebar-icon', { active: alwaysOnTop }]"
@@ -291,6 +313,7 @@ async function handleRelayConnectionTest(relay: { enabled: boolean; baseUrl: str
             :notification-mode="status?.notificationMode ?? 'verification'"
             :notification-position="status?.notificationPosition ?? 'bottomRight'"
             :direct-paste-enabled="status?.directPasteEnabled ?? false"
+            :is-macos="isMacos"
             :relay-enabled="status?.relayEnabled ?? false"
             :relay-running="status?.relayRunning ?? false"
             :relay-base-url="status?.relayBaseUrl ?? ''"
@@ -350,8 +373,12 @@ async function handleRelayConnectionTest(relay: { enabled: boolean; baseUrl: str
   height: 100%;
   overflow: hidden;
   display: grid;
-  grid-template-rows: 40px minmax(0, 1fr);
-  background: #eef3f8;
+  grid-template-rows: 44px minmax(0, 1fr);
+  background: transparent;
+}
+
+body.macos .window-frame {
+  grid-template-rows: 0 minmax(0, 1fr);
 }
 
 .titlebar {
@@ -359,10 +386,23 @@ async function handleRelayConnectionTest(relay: { enabled: boolean; baseUrl: str
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 0 8px 0 14px;
-  border-bottom: 1px solid rgba(28, 39, 54, 0.08);
-  background: rgba(245, 248, 252, 0.92);
+  padding: 0 12px 0 16px;
+  border-bottom: 1px solid var(--glass-border-light);
+  background: var(--glass-bg-medium);
+  backdrop-filter: var(--glass-blur);
   user-select: none;
+}
+
+.titlebar.macos {
+  -webkit-app-region: drag;
+  justify-content: flex-start;
+  height: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+  border-bottom: 0;
+  background: transparent;
+  backdrop-filter: none;
 }
 
 .titlebar-title,
@@ -374,9 +414,10 @@ async function handleRelayConnectionTest(relay: { enabled: boolean; baseUrl: str
 
 .titlebar-title {
   min-width: 0;
-  color: #17202f;
-  font-size: 14px;
-  font-weight: 700;
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
 }
 
 .titlebar-app-icon {
@@ -388,13 +429,13 @@ async function handleRelayConnectionTest(relay: { enabled: boolean; baseUrl: str
 }
 
 .titlebar-icon {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   display: grid;
   place-items: center;
   border: 0;
-  border-radius: 7px;
-  color: #465160;
+  border-radius: var(--glass-radius-small);
+  color: var(--text-secondary);
   background: transparent;
   cursor: pointer;
 }
@@ -411,13 +452,13 @@ async function handleRelayConnectionTest(relay: { enabled: boolean; baseUrl: str
 
 .titlebar-icon:hover,
 .titlebar-icon.active {
-  color: #1769e0;
-  background: #e8f1ff;
+  color: var(--accent-blue);
+  background: var(--glass-bg-light);
 }
 
 .titlebar-icon.close:hover {
-  color: #b42318;
-  background: #fee4e2;
+  color: #ff3b30;
+  background: rgba(255, 59, 48, 0.1);
 }
 
 .app-shell {
@@ -425,25 +466,30 @@ async function handleRelayConnectionTest(relay: { enabled: boolean; baseUrl: str
   overflow: hidden;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
-  gap: 10px;
+  gap: 12px;
   padding: 16px;
-  background:
-    linear-gradient(135deg, rgba(23, 105, 224, 0.08), transparent 34%),
-    linear-gradient(180deg, #f4f7fb 0%, #eef3f8 100%);
+  background: transparent;
+}
+
+body.macos .app-shell {
+  padding-top: 10px;
 }
 
 .error-banner {
   margin: 0;
-  padding: 10px 12px;
+  padding: 12px 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  border: 1px solid #ffd8d6;
-  border-radius: 8px;
-  color: #a63932;
-  background: #fff1f0;
-  font-size: 13px;
+  border: 1px solid rgba(255, 59, 48, 0.3);
+  border-radius: var(--glass-radius-medium);
+  color: #ff3b30;
+  background: rgba(255, 59, 48, 0.12);
+  backdrop-filter: var(--glass-blur);
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(255, 59, 48, 0.1);
 }
 
 .error-banner span {
@@ -454,20 +500,20 @@ async function handleRelayConnectionTest(relay: { enabled: boolean; baseUrl: str
 }
 
 .error-banner button {
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   flex: 0 0 auto;
   display: grid;
   place-items: center;
   border: 0;
-  border-radius: 6px;
-  color: #a63932;
-  background: transparent;
+  border-radius: var(--glass-radius-small);
+  color: #ff3b30;
+  background: rgba(255, 59, 48, 0.1);
   cursor: pointer;
 }
 
 .error-banner button:hover {
-  background: #ffe4e2;
+  background: rgba(255, 59, 48, 0.2);
 }
 
 .error-banner svg {
@@ -487,31 +533,34 @@ async function handleRelayConnectionTest(relay: { enabled: boolean; baseUrl: str
   display: grid;
   place-items: center;
   padding: 20px;
-  background: rgba(15, 23, 42, 0.42);
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(12px);
 }
 
 .modal-window {
-  width: min(620px, calc(100vw - 40px));
+  width: min(640px, calc(100vw - 40px));
   max-height: calc(100vh - 40px);
   overflow: hidden;
-  border: 1px solid rgba(28, 39, 54, 0.12);
-  border-radius: 10px;
-  background: #ffffff;
-  box-shadow: 0 24px 70px rgba(28, 39, 54, 0.26);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--glass-radius-large);
+  background: var(--glass-bg-heavy);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shadow-heavy);
 }
 
 .modal-titlebar {
-  height: 40px;
+  height: 54px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 0 8px 0 14px;
-  border-bottom: 1px solid rgba(28, 39, 54, 0.08);
-  color: #17202f;
-  background: #f8fafc;
-  font-size: 14px;
-  font-weight: 700;
+  gap: 12px;
+  padding: 0 16px 0 20px;
+  border-bottom: 1px solid var(--glass-border-light);
+  color: var(--text-primary);
+  background: transparent;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
 }
 
 .modal-content {
@@ -520,14 +569,14 @@ async function handleRelayConnectionTest(relay: { enabled: boolean; baseUrl: str
 }
 
 .modal-close {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   display: grid;
   place-items: center;
   border: 0;
-  border-radius: 7px;
-  color: #465160;
-  background: transparent;
+  border-radius: var(--glass-radius-small);
+  color: var(--text-secondary);
+  background: var(--glass-bg-light);
   cursor: pointer;
 }
 
@@ -542,7 +591,7 @@ async function handleRelayConnectionTest(relay: { enabled: boolean; baseUrl: str
 }
 
 .modal-close:hover {
-  color: #b42318;
-  background: #fee4e2;
+  color: var(--text-primary);
+  background: var(--glass-bg-medium);
 }
 </style>
