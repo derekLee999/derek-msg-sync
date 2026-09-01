@@ -69,7 +69,7 @@ async function minimizeWindow() {
 }
 
 async function hideWindow() {
-  await appWindow.hide()
+  await invoke('hide_main_window_command')
 }
 
 async function loadPlatform() {
@@ -180,8 +180,8 @@ async function handleDirectPasteChange(enabled: boolean) {
   try {
     await setDirectPasteEnabled(enabled)
     showToast(enabled ? '直接输入已开启' : '直接输入已关闭')
-  } catch {
-    showToast('直接输入设置保存失败')
+  } catch (cause) {
+    showToast(String(cause) || '直接输入设置保存失败')
   }
 }
 
@@ -376,7 +376,7 @@ onUnmounted(() => {
 }
 
 body.macos .window-frame {
-  grid-template-rows: 52px minmax(0, 1fr);
+  grid-template-rows: 0 minmax(0, 1fr);
 }
 
 .titlebar {
@@ -394,10 +394,13 @@ body.macos .window-frame {
 .titlebar.macos {
   -webkit-app-region: drag;
   justify-content: flex-start;
-  padding: 0 16px 0 82px;
-  border-bottom-color: var(--glass-border-light);
-  background: var(--glass-bg-medium);
-  backdrop-filter: var(--glass-blur);
+  height: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+  border-bottom: 0;
+  background: transparent;
+  backdrop-filter: none;
 }
 
 .titlebar-title,
@@ -464,6 +467,10 @@ body.macos .window-frame {
   gap: 12px;
   padding: 16px;
   background: transparent;
+}
+
+body.macos .app-shell {
+  padding-top: 10px;
 }
 
 .error-banner {

@@ -466,10 +466,16 @@ onMounted(() => {
       <p v-else-if="notificationMode !== 'off' && isMacos" class="macos-notification-hint">
         macOS 上通知浮窗固定显示在右上角。
       </p>
-      <div v-if="!isMacos" class="setting-row">
+      <div class="setting-row">
         <div>
           <span>直接输入</span>
-          <small>收到验证码后复制到剪贴板，并向当前光标位置逐个字符输入验证码</small>
+          <small>
+            {{
+              isMacos
+                ? '收到验证码后复制到剪贴板，并向当前光标位置粘贴验证码'
+                : '收到验证码后复制到剪贴板，并向当前光标位置逐个字符输入验证码'
+            }}
+          </small>
         </div>
         <button
           type="button"

@@ -13,7 +13,7 @@ use std::{
     time::Duration,
 };
 #[cfg(target_os = "macos")]
-use tauri::menu::Submenu;
+use tauri::menu::{PredefinedMenuItem, Submenu};
 #[cfg(target_os = "macos")]
 use tauri::TitleBarStyle;
 use tauri::{
@@ -30,6 +30,12 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
     KEYEVENTF_UNICODE, VIRTUAL_KEY,
 };
+
+#[cfg(target_os = "macos")]
+#[link(name = "ApplicationServices", kind = "framework")]
+extern "C" {
+    fn AXIsProcessTrusted() -> std::ffi::c_uchar;
+}
 
 const DEFAULT_SERVER_PORT: u16 = 17866;
 const DEFAULT_DEVICE_ID: &str = "default-iphone";
@@ -296,7 +302,13 @@ fn platform_info() -> PlatformInfo {
 
 #[tauri::command]
 fn open_settings(app: AppHandle) {
+    show_main_window(&app);
     let _ = app.emit("open-settings", ());
+}
+
+#[tauri::command]
+fn hide_main_window_command(app: AppHandle) {
+    hide_main_window(&app);
 }
 
 #[tauri::command]
@@ -327,6 +339,10 @@ fn set_notification_position(
 
 #[tauri::command]
 fn set_direct_paste_enabled(enabled: bool, state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    if enabled {
+        ensure_direct_paste_permission()?;
+    }
+
     let state = state.inner().clone();
     *state
         .direct_paste_enabled
@@ -881,6 +897,9 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     let tray_settings = MenuItem::with_id(app, MENU_SETTINGS_ID, "设置...", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, TRAY_EXIT_ID, "退出程序", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&tray_settings, &quit])?;
+    #[cfg(target_os = "macos")]
+    let icon = Image::from_bytes(include_bytes!("../icons/menu.png"))?;
+    #[cfg(not(target_os = "macos"))]
     let icon = Image::from_bytes(include_bytes!("../icons/icon.ico"))?;
 
     #[cfg(target_os = "macos")]
@@ -891,7 +910,21 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
             MenuItem::with_id(app, TRAY_EXIT_ID, "退出程序", true, Some("CmdOrCtrl+Q"))?;
         let app_menu =
             Submenu::with_items(app, "验证码接收器", true, &[&menu_settings, &menu_quit])?;
-        let main_menu = Menu::with_items(app, &[&app_menu])?;
+        let edit_menu = Submenu::with_items(
+            app,
+            "Edit",
+            true,
+            &[
+                &PredefinedMenuItem::undo(app, None)?,
+                &PredefinedMenuItem::redo(app, None)?,
+                &PredefinedMenuItem::separator(app)?,
+                &PredefinedMenuItem::cut(app, None)?,
+                &PredefinedMenuItem::copy(app, None)?,
+                &PredefinedMenuItem::paste(app, None)?,
+                &PredefinedMenuItem::select_all(app, None)?,
+            ],
+        )?;
+        let main_menu = Menu::with_items(app, &[&app_menu, &edit_menu])?;
         app.set_menu(main_menu)?;
     }
 
@@ -918,11 +951,7 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
             } = event
             {
                 let app = tray.app_handle();
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.unminimize();
-                    let _ = window.set_focus();
-                }
+                show_main_window(app);
             }
         })
         .build(app)?;
@@ -1120,7 +1149,7 @@ fn ensure_notification_window(app: &AppHandle) -> tauri::Result<tauri::WebviewWi
         return Ok(window);
     }
 
-    WebviewWindowBuilder::new(
+    let builder = WebviewWindowBuilder::new(
         app,
         NOTIFICATION_LABEL,
         WebviewUrl::App("index.html".into()),
@@ -1128,13 +1157,17 @@ fn ensure_notification_window(app: &AppHandle) -> tauri::Result<tauri::WebviewWi
     .title("验证码接收器")
     .inner_size(NOTIFICATION_WIDTH, NOTIFICATION_HEIGHT)
     .resizable(false)
-    .decorations(false)
-    .transparent(true)
-    .always_on_top(true)
-    .skip_taskbar(true)
-    .focused(false)
-    .visible(false)
-    .build()
+    .decorations(false);
+
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.transparent(true);
+
+    builder
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .focused(false)
+        .visible(false)
+        .build()
 }
 
 fn position_notification_window(
@@ -1251,6 +1284,41 @@ fn default_notification_position() -> NotificationPosition {
     NotificationPosition::BottomRight
 }
 
+#[cfg(target_os = "macos")]
+fn ensure_direct_paste_permission() -> Result<(), String> {
+    if macos_accessibility_permission_granted() {
+        return Ok(());
+    }
+
+    open_macos_accessibility_settings();
+    Err("请在系统设置中为验证码接收器开启辅助功能权限后，再启用直接输入".to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn ensure_direct_paste_permission() -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn macos_accessibility_permission_granted() -> bool {
+    unsafe { AXIsProcessTrusted() != 0 }
+}
+
+#[cfg(target_os = "macos")]
+fn open_macos_accessibility_settings() {
+    let opened = std::process::Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
+
+    if !opened {
+        let _ = std::process::Command::new("open")
+            .arg("/System/Library/PreferencePanes/Security.prefPane")
+            .status();
+    }
+}
+
 #[cfg(target_os = "windows")]
 fn type_text(text: &str) -> Result<(), String> {
     if text.is_empty() {
@@ -1275,7 +1343,28 @@ fn type_text(text: &str) -> Result<(), String> {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
+fn type_text(text: &str) -> Result<(), String> {
+    if text.is_empty() {
+        return Ok(());
+    }
+
+    let status = std::process::Command::new("osascript")
+        .args([
+            "-e",
+            r#"tell application "System Events" to keystroke "v" using command down"#,
+        ])
+        .status()
+        .map_err(|error| format!("执行 Command+V 失败: {}", error))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err("执行 Command+V 失败，请检查辅助功能权限".to_string())
+    }
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 fn type_text(_text: &str) -> Result<(), String> {
     Err("当前平台暂不支持直接输入".to_string())
 }
@@ -1470,11 +1559,11 @@ pub fn run() {
                     let _ = window.set_decorations(true);
                     let _ = window.set_title_bar_style(TitleBarStyle::Overlay);
                 }
-                let window_for_close = window.clone();
+                let app_for_close = app.handle().clone();
                 window.on_window_event(move |event| {
                     if let WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
-                        let _ = window_for_close.hide();
+                        hide_main_window(&app_for_close);
                     }
                 });
             }
@@ -1493,6 +1582,7 @@ pub fn run() {
             clear_messages,
             platform_info,
             open_settings,
+            hide_main_window_command,
             receiver_status,
             set_notification_mode,
             set_notification_position,
@@ -1511,11 +1601,52 @@ pub fn run() {
 }
 
 fn show_main_window(app: &AppHandle) {
+    restore_macos_app_icon(app);
+
+    #[cfg(target_os = "macos")]
+    let _ = app.set_dock_visibility(true);
+
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
         let _ = window.unminimize();
+        let _ = window.show();
         let _ = window.set_focus();
     }
+
+    restore_macos_app_icon(app);
+}
+
+fn hide_main_window(app: &AppHandle) {
+    restore_macos_app_icon(app);
+
+    #[cfg(target_os = "macos")]
+    let _ = app.set_dock_visibility(false);
+
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn restore_macos_app_icon(app: &AppHandle) {
+    let _ = app.run_on_main_thread(|| {
+        use objc2::{AllocAnyThread, MainThreadMarker};
+        use objc2_app_kit::{NSApplication, NSImage};
+        use objc2_foundation::NSData;
+
+        let mtm = unsafe { MainThreadMarker::new_unchecked() };
+        let ns_app = NSApplication::sharedApplication(mtm);
+        let icon_data = NSData::with_bytes(include_bytes!("../icons/icon.png"));
+
+        if let Some(icon) = NSImage::initWithData(NSImage::alloc(), &icon_data) {
+            unsafe {
+                ns_app.setApplicationIconImage(Some(&icon));
+            }
+        }
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+fn restore_macos_app_icon(_app: &AppHandle) {
 }
 
 #[cfg(test)]

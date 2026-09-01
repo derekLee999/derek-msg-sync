@@ -1,0 +1,537 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#edf5ff" />
+    <title>验证码接收器 · Android 界面原型</title>
+    <style>
+      :root {
+        --canvas: #edf5ff;
+        --canvas-deep: #e6f0fb;
+        --surface: rgba(255, 255, 255, 0.78);
+        --surface-solid: #ffffff;
+        --ink: #182337;
+        --subtle: #697993;
+        --line: rgba(104, 140, 181, 0.14);
+        --blue: #1677ff;
+        --blue-strong: #0b65e8;
+        --blue-wash: #eaf3ff;
+        --green: #18a457;
+        --green-wash: #e8f9ef;
+        --amber: #bf7610;
+        --amber-wash: #fff6df;
+        --red: #e44e4e;
+        --shadow: 0 14px 32px rgba(61, 103, 145, 0.11), 0 2px 7px rgba(61, 103, 145, 0.05);
+        --radius-xl: 28px;
+        --radius-lg: 22px;
+        --radius-md: 16px;
+        --radius-sm: 12px;
+        font-family: "SF Pro Display", "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+        color: var(--ink);
+        font-synthesis: none;
+      }
+
+      * { box-sizing: border-box; }
+
+      html, body { min-height: 100%; }
+
+      body {
+        margin: 0;
+        min-width: 320px;
+        background:
+          radial-gradient(circle at 18% 5%, rgba(107, 185, 255, 0.25), transparent 26rem),
+          radial-gradient(circle at 85% 84%, rgba(119, 205, 246, 0.19), transparent 30rem),
+          #f6faff;
+      }
+
+      button, input { font: inherit; }
+
+      button {
+        border: 0;
+        color: inherit;
+        cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      .prototype-note {
+        position: fixed;
+        top: 22px;
+        left: 50%;
+        z-index: 3;
+        transform: translateX(-50%);
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        width: max-content;
+        max-width: calc(100vw - 32px);
+        padding: 10px 15px;
+        border: 1px solid rgba(255, 255, 255, 0.8);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.72);
+        box-shadow: 0 10px 28px rgba(51, 84, 120, 0.12);
+        color: #60718c;
+        font-size: 13px;
+        font-weight: 600;
+        backdrop-filter: blur(18px);
+      }
+
+      .prototype-note i {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--green);
+        box-shadow: 0 0 0 4px rgba(24, 164, 87, 0.12);
+      }
+
+      .phone {
+        position: relative;
+        width: min(100%, 430px);
+        min-height: 100dvh;
+        margin: 0 auto;
+        overflow: hidden;
+        background: var(--canvas);
+        box-shadow: 0 0 0 1px rgba(111, 158, 202, 0.12), 0 28px 70px rgba(36, 74, 113, 0.18);
+      }
+
+      .page {
+        display: none;
+        height: 100dvh;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        padding: max(20px, env(safe-area-inset-top)) 20px calc(113px + env(safe-area-inset-bottom));
+        scrollbar-width: none;
+      }
+
+      .page::-webkit-scrollbar { display: none; }
+      .page.active { display: block; }
+
+      .ambient-orb {
+        position: absolute;
+        top: -124px;
+        right: -125px;
+        width: 360px;
+        height: 360px;
+        border: 1px solid rgba(255, 255, 255, 0.55);
+        border-radius: 50%;
+        background: radial-gradient(circle at 35% 65%, rgba(162, 215, 255, 0.38), rgba(224, 242, 255, 0.02) 64%);
+        pointer-events: none;
+      }
+
+      .appbar {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        min-height: 68px;
+        padding-top: 10px;
+      }
+
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        color: var(--green);
+        font-size: 15px;
+        font-weight: 700;
+      }
+
+      .status::before {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: #16c861;
+        box-shadow: 0 0 0 4px rgba(22, 200, 97, 0.1);
+        content: "";
+      }
+
+      .icon-button {
+        display: grid;
+        width: 52px;
+        height: 52px;
+        place-items: center;
+        border: 1px solid rgba(255, 255, 255, 0.84);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.68);
+        box-shadow: 0 8px 20px rgba(62, 107, 157, 0.11);
+        color: var(--blue);
+        transition: transform 0.2s ease, background 0.2s ease;
+      }
+
+      .icon-button:active { transform: scale(0.94); }
+      .icon-button svg { width: 25px; height: 25px; stroke: currentColor; stroke-width: 2.4; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+
+      .recent-code {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        margin: 4px 0 24px;
+        color: #6b7b95;
+        font-size: 15px;
+        font-weight: 600;
+      }
+
+      .recent-code strong { color: var(--blue); font-size: 19px; letter-spacing: 0.2px; }
+
+      .filter-row {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        width: 100%;
+        padding: 10px 13px;
+        border: 1px solid rgba(255, 255, 255, 0.8);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.73);
+        box-shadow: var(--shadow);
+        color: #52647f;
+        font-size: 16px;
+        font-weight: 650;
+        text-align: left;
+      }
+
+      .filter-icon, .sender-icon {
+        display: grid;
+        flex: 0 0 auto;
+        place-items: center;
+        border-radius: 50%;
+      }
+
+      .filter-icon { width: 38px; height: 38px; background: #edf5ff; color: var(--blue); }
+      .filter-icon svg, .sender-icon svg { width: 22px; height: 22px; stroke: currentColor; stroke-width: 2.2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+      .filter-row .chevron { margin-left: auto; width: 18px; height: 18px; stroke: currentColor; stroke-width: 2; fill: none; }
+
+      .inbox-count { margin: 30px 5px 15px; color: #5c6f8c; font-size: 15px; }
+      .inbox-count b { color: var(--blue); font-size: 19px; }
+
+      .message-list { display: grid; gap: 12px; }
+
+      .message {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 12px;
+        align-items: center;
+        padding: 18px;
+        border: 1px solid rgba(255, 255, 255, 0.76);
+        border-radius: var(--radius-lg);
+        background: var(--surface);
+        box-shadow: var(--shadow);
+      }
+
+      .message-body { min-width: 0; }
+      .message-copy { display: -webkit-box; overflow: hidden; margin: 0; color: #405777; font-size: 15px; line-height: 1.56; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+      .message-meta { margin: 9px 0 0; color: #92a0b5; font-size: 12px; }
+
+      .code-tile {
+        min-width: 88px;
+        margin: 0;
+        padding: 13px 9px;
+        border-radius: 13px;
+        background: linear-gradient(135deg, #eff7ff, #e3f0ff);
+        color: var(--blue);
+        font-size: 22px;
+        font-weight: 760;
+        letter-spacing: -0.4px;
+        text-align: center;
+      }
+
+      .message.no-code { grid-template-columns: minmax(0, 1fr); }
+      .message.no-code .message-copy { -webkit-line-clamp: 3; }
+
+      .bottom-nav {
+        position: fixed;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        z-index: 5;
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        width: min(100%, 430px);
+        height: calc(82px + env(safe-area-inset-bottom));
+        margin: 0 auto;
+        padding: 11px 38px max(10px, env(safe-area-inset-bottom));
+        border: 1px solid rgba(255, 255, 255, 0.9);
+        border-bottom: 0;
+        border-radius: 25px 25px 0 0;
+        background: rgba(255, 255, 255, 0.86);
+        box-shadow: 0 -10px 28px rgba(61, 98, 139, 0.1);
+        backdrop-filter: blur(24px) saturate(1.4);
+      }
+
+      .nav-item {
+        display: grid;
+        place-items: center;
+        gap: 3px;
+        border-radius: 15px;
+        background: transparent;
+        color: #71829d;
+        font-size: 13px;
+        font-weight: 650;
+      }
+
+      .nav-item svg { width: 24px; height: 24px; stroke: currentColor; stroke-width: 2.2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+      .nav-item.active { color: var(--blue); }
+      .nav-item.active svg { fill: rgba(22, 119, 255, 0.1); }
+      .nav-item.active::after { width: 28px; height: 3px; border-radius: 99px; background: var(--blue); content: ""; }
+
+      .settings-stack { position: relative; z-index: 1; display: grid; gap: 15px; }
+
+      .settings-card {
+        padding: 21px 18px 18px;
+        border: 1px solid rgba(255, 255, 255, 0.9);
+        border-radius: var(--radius-xl);
+        background: var(--surface);
+        box-shadow: var(--shadow);
+      }
+
+      .settings-heading { display: flex; align-items: center; gap: 11px; margin-bottom: 18px; }
+      .settings-heading h2 { margin: 0; color: #203252; font-size: 20px; letter-spacing: -0.5px; }
+      .heading-icon { display: grid; width: 39px; height: 39px; place-items: center; border-radius: 14px; background: #eaf3ff; color: var(--blue); }
+      .heading-icon svg { width: 22px; height: 22px; stroke: currentColor; stroke-width: 2.1; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+      .connected { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; padding: 7px 10px; border-radius: 999px; background: var(--green-wash); color: var(--green); font-size: 13px; font-weight: 750; }
+      .connected::before { width: 7px; height: 7px; border-radius: 50%; background: currentColor; content: ""; }
+
+      .notice { display: flex; gap: 10px; margin: -1px 0 16px; padding: 12px; border: 1px solid #ffe1a0; border-radius: 14px; background: var(--amber-wash); color: #8b5a0d; font-size: 13px; line-height: 1.55; }
+      .notice svg { flex: 0 0 auto; width: 18px; height: 18px; margin-top: 1px; stroke: currentColor; stroke-width: 2.2; fill: none; }
+
+      .field { display: grid; gap: 7px; margin-top: 14px; }
+      .field label { color: #637590; font-size: 14px; font-weight: 650; }
+      .input-shell { display: flex; align-items: center; gap: 8px; min-height: 49px; padding: 0 13px; border: 1px solid #e4ecf6; border-radius: 14px; background: rgba(255, 255, 255, 0.82); box-shadow: inset 0 1px 2px rgba(59, 91, 128, 0.03); }
+      .input-shell input { width: 100%; border: 0; outline: 0; background: transparent; color: #263956; font-size: 16px; }
+      .field-action { display: grid; width: 30px; height: 30px; flex: 0 0 auto; place-items: center; border-radius: 10px; background: #edf5ff; color: var(--blue); }
+      .field-action svg { width: 17px; height: 17px; stroke: currentColor; stroke-width: 2.2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+      .field-help { margin: 2px 0 0; color: #8b9ab0; font-size: 12px; line-height: 1.45; }
+
+      .card-divider { height: 1px; margin: 18px 0 15px; background: var(--line); }
+      .two-fields { display: grid; grid-template-columns: 1.14fr 0.86fr; gap: 11px; }
+
+      .card-actions { display: flex; gap: 10px; margin-top: 18px; }
+      .action { min-height: 44px; padding: 0 15px; border-radius: 14px; background: #eff4fa; color: #4f627f; font-size: 14px; font-weight: 700; }
+      .action.primary { flex: 1; background: linear-gradient(135deg, #1677ff, #45b9f8); box-shadow: 0 9px 17px rgba(22, 119, 255, 0.24); color: white; }
+
+      .device-card { padding-bottom: 14px; }
+      .device-row { display: flex; align-items: center; gap: 12px; padding: 13px 0 2px; }
+      .device-avatar { display: grid; width: 42px; height: 42px; flex: 0 0 auto; place-items: center; border-radius: 14px; background: #edf5ff; color: var(--blue); }
+      .device-avatar svg { width: 23px; height: 23px; stroke: currentColor; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+      .device-name { margin: 0; color: #31425f; font-size: 16px; font-weight: 720; }
+      .device-id { margin: 3px 0 0; color: #8b9ab0; font-size: 13px; }
+      .device-edit { display: grid; width: 34px; height: 34px; margin-left: auto; place-items: center; border-radius: 12px; background: transparent; color: #7d90ac; }
+      .device-edit svg { width: 19px; height: 19px; stroke: currentColor; stroke-width: 2.1; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+
+      .toast {
+        position: fixed;
+        bottom: 100px;
+        left: 50%;
+        z-index: 10;
+        transform: translate(-50%, 16px);
+        padding: 10px 15px;
+        border-radius: 999px;
+        background: rgba(24, 35, 55, 0.88);
+        box-shadow: 0 10px 25px rgba(24, 35, 55, 0.2);
+        color: white;
+        font-size: 13px;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.22s ease, transform 0.22s ease;
+      }
+
+      .toast.show { transform: translate(-50%, 0); opacity: 1; }
+      .is-spinning { animation: spin 0.7s ease-in-out; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+
+      @media (min-width: 650px) {
+        body { padding: 85px 0; }
+        .phone { min-height: 820px; height: min(860px, calc(100dvh - 100px)); border-radius: 38px; }
+        .page { height: 100%; }
+        .bottom-nav { position: absolute; }
+        .prototype-note { top: 24px; }
+      }
+
+      @media (max-width: 649px) {
+        .prototype-note { display: none; }
+        .phone { width: 100vw; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="prototype-note"><i></i> Android HTML 交互原型</div>
+
+    <main class="phone" aria-label="验证码接收器 Android 设计原型">
+      <section class="page active inbox-page" data-page="inbox" aria-label="收件台">
+        <div class="ambient-orb"></div>
+        <header class="appbar">
+          <span class="status">监听中</span>
+          <button class="icon-button" id="refresh-button" type="button" aria-label="刷新消息" title="刷新消息">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0-14.2-4.7L4 8"></path><path d="M4 4v4h4"></path><path d="M4 13a8.1 8.1 0 0 0 14.2 4.7L20 16"></path><path d="M20 20v-4h-4"></path></svg>
+          </button>
+        </header>
+
+        <p class="recent-code">最近接收 <strong>887583</strong></p>
+
+        <button class="filter-row" id="filter-button" type="button" aria-pressed="true">
+          <span class="filter-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16l-6.2 7.4v5.2l-3.6 2v-7.2L4 4Z"></path></svg></span>
+          <span id="filter-label">仅显示验证码</span>
+          <svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"></path></svg>
+        </button>
+
+        <p class="inbox-count">共 <b id="message-count">6</b> 条消息</p>
+
+        <div class="message-list" id="message-list">
+          <article class="message otp">
+            <div class="message-body"><p class="message-copy">【阿里云】您正在修改安全邮箱，验证码 887583，请勿泄露给他人。</p><p class="message-meta">今天 09:41 · iPhone 16 Pro</p></div>
+            <button class="code-tile" type="button" data-code="887583" aria-label="复制验证码 887583">887583</button>
+          </article>
+          <article class="message otp">
+            <div class="message-body"><p class="message-copy">【支付宝】登录验证码：927761。支付宝全力保护你的账户安全。</p><p class="message-meta">今天 09:34 · iPhone 16 Pro</p></div>
+            <button class="code-tile" type="button" data-code="927761" aria-label="复制验证码 927761">927761</button>
+          </article>
+          <article class="message otp">
+            <div class="message-body"><p class="message-copy">【美团】2088（登录验证码，请完成验证），如非本人操作，请忽略本短信。</p><p class="message-meta">昨天 18:57 · iPhone 16 Pro</p></div>
+            <button class="code-tile" type="button" data-code="2088" aria-label="复制验证码 2088">2088</button>
+          </article>
+          <article class="message otp">
+            <div class="message-body"><p class="message-copy">您的登录验证码为 741029，有效期 5 分钟。</p><p class="message-meta">昨天 16:22 · iPhone 16 Pro</p></div>
+            <button class="code-tile" type="button" data-code="741029" aria-label="复制验证码 741029">741029</button>
+          </article>
+          <article class="message no-code">
+            <div class="message-body"><p class="message-copy">【阿里云】尊敬的用户，您已成功修改云账号下绑定的安全邮箱，原邮箱无法再接收验证码等安全验证消息。</p><p class="message-meta">昨天 16:19 · iPhone 16 Pro</p></div>
+          </article>
+          <article class="message otp">
+            <div class="message-body"><p class="message-copy">【豆包】验证码 460290，用于手机验证码登录，5 分钟内有效。</p><p class="message-meta">08/16 11:06 · iPhone 16 Pro</p></div>
+            <button class="code-tile" type="button" data-code="460290" aria-label="复制验证码 460290">460290</button>
+          </article>
+        </div>
+      </section>
+
+      <section class="page settings-page" data-page="settings" aria-label="设置">
+        <div class="ambient-orb"></div>
+
+        <div class="settings-stack">
+          <section class="settings-card" aria-labelledby="lan-heading">
+            <div class="settings-heading">
+              <span class="heading-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="8" width="16" height="12" rx="2"></rect><path d="M8 8V5a4 4 0 0 1 8 0v3M8 14h.01M12 14h.01M16 14h.01"></path></svg></span>
+              <h2 id="lan-heading">局域网接入</h2>
+            </div>
+            <div class="notice"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 10v5M12 7h.01"></path></svg><span>请将 iPhone 快捷指令的接收地址改为本机地址，并填写当前设备 ID。</span></div>
+            <div class="field"><label for="receiver-url">接收地址</label><div class="input-shell"><input id="receiver-url" value="http://192.168.1.108:17866/otp" readonly /><button class="field-action copy-action" type="button" data-copy="http://192.168.1.108:17866/otp" aria-label="复制接收地址"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="10" height="10" rx="1"></rect><path d="M15 9V5H5v10h4"></path></svg></button></div></div>
+            <div class="two-fields"><div class="field"><label for="port">服务端口</label><div class="input-shell"><input id="port" value="17866" readonly /></div></div><div class="field"><label>&nbsp;</label><button class="action" type="button" id="restart-button">重启服务</button></div></div>
+          </section>
+
+          <section class="settings-card" aria-labelledby="relay-heading">
+            <div class="settings-heading">
+              <span class="heading-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 18a4 4 0 0 1-.3-8A5.5 5.5 0 0 1 17.3 8 4 4 0 1 1 18 18H7Z"></path></svg></span>
+              <h2 id="relay-heading">云端接入</h2><span class="connected">已连接</span>
+            </div>
+            <div class="field"><label for="relay-url">云端服务地址</label><div class="input-shell"><input id="relay-url" value="https://relay.example.com" readonly /><button class="field-action copy-action" type="button" data-copy="https://relay.example.com" aria-label="复制云端服务地址"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="10" height="10" rx="1"></rect><path d="M15 9V5H5v10h4"></path></svg></button></div><p class="field-help">iPhone 会向 /api/messages 提交消息。</p></div>
+            <div class="field"><label for="secret">云端密钥</label><div class="input-shell"><input id="secret" type="password" value="receiver-secret-2026" readonly /><button class="field-action" id="secret-toggle" type="button" aria-label="显示或隐藏云端密钥"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.2-5.5 9.5-5.5S21.5 12 21.5 12 18.3 17.5 12 17.5 2.5 12 2.5 12Z"></path><circle cx="12" cy="12" r="2.5"></circle></svg></button></div></div>
+            <div class="card-actions"><button class="action" type="button" id="test-button">测试连接</button><button class="action primary" type="button" id="save-button">保存配置</button></div>
+          </section>
+
+          <section class="settings-card device-card" aria-labelledby="device-heading">
+            <div class="settings-heading"><span class="heading-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="3" width="10" height="18" rx="2"></rect><path d="M11 18h2"></path></svg></span><h2 id="device-heading">设备识别</h2></div>
+            <div class="device-row"><span class="device-avatar"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="3" width="10" height="18" rx="2"></rect><path d="M11 18h2"></path></svg></span><div><p class="device-name">iPhone 16 Pro</p><p class="device-id">设备 ID · 1721062</p></div><button class="device-edit" type="button" id="device-edit" aria-label="编辑设备"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5.5 4 4M4 20l4.3-1 10.2-10.2a2.8 2.8 0 0 0-4-4L4.3 14.9 4 20Z"></path></svg></button></div>
+          </section>
+        </div>
+      </section>
+
+      <nav class="bottom-nav" aria-label="主导航">
+        <button class="nav-item active" type="button" data-target="inbox" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h16v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8Z"></path><path d="M4 8l3-4h10l3 4M8 12h8"></path></svg><span>收件台</span></button>
+        <button class="nav-item" type="button" data-target="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 13.2a7.4 7.4 0 0 0 0-2.4l2-1.4-2-3.5-2.3 1a8 8 0 0 0-2.1-1.2L14.6 3H9.4l-.3 2.7A8 8 0 0 0 7 6.9l-2.3-1-2 3.5 2 1.4a7.4 7.4 0 0 0 0 2.4l-2 1.4 2 3.5 2.3-1a8 8 0 0 0 2.1 1.2l.3 2.7h5.2l.3-2.7a8 8 0 0 0 2.1-1.2l2.3 1 2-3.5-2-1.4Z"></path></svg><span>设置</span></button>
+      </nav>
+      <div class="toast" role="status" aria-live="polite"></div>
+    </main>
+
+    <script>
+      const pages = document.querySelectorAll('.page');
+      const navItems = document.querySelectorAll('.nav-item');
+      const toast = document.querySelector('.toast');
+      const filterButton = document.querySelector('#filter-button');
+      const filterLabel = document.querySelector('#filter-label');
+      const messageCount = document.querySelector('#message-count');
+      let toastTimer;
+
+      function showToast(message) {
+        window.clearTimeout(toastTimer);
+        toast.textContent = message;
+        toast.classList.add('show');
+        toastTimer = window.setTimeout(() => toast.classList.remove('show'), 1600);
+      }
+
+      function log(event, details = {}) {
+        console.info('[android-design]', event, details);
+      }
+
+      navItems.forEach((item) => {
+        item.addEventListener('click', () => {
+          const target = item.dataset.target;
+          pages.forEach((page) => page.classList.toggle('active', page.dataset.page === target));
+          navItems.forEach((nav) => {
+            const selected = nav === item;
+            nav.classList.toggle('active', selected);
+            nav.toggleAttribute('aria-current', selected);
+          });
+          log('navigation_changed', { target });
+        });
+      });
+
+      const initialTarget = window.location.hash.slice(1);
+      if (initialTarget === 'settings' || initialTarget === 'inbox') {
+        document.querySelector(`.nav-item[data-target="${initialTarget}"]`).click();
+      }
+
+      document.querySelector('#refresh-button').addEventListener('click', (event) => {
+        const icon = event.currentTarget.querySelector('svg');
+        icon.classList.remove('is-spinning');
+        void icon.offsetWidth;
+        icon.classList.add('is-spinning');
+        showToast('消息已刷新');
+        log('inbox_refreshed');
+      });
+
+      filterButton.addEventListener('click', () => {
+        const enabled = filterButton.getAttribute('aria-pressed') === 'true';
+        const next = !enabled;
+        filterButton.setAttribute('aria-pressed', String(next));
+        filterLabel.textContent = next ? '仅显示验证码' : '显示全部消息';
+        document.querySelectorAll('.message.no-code').forEach((card) => card.toggleAttribute('hidden', next));
+        messageCount.textContent = next ? '5' : '6';
+        showToast(next ? '已筛选验证码消息' : '已显示全部消息');
+        log('verification_filter_changed', { enabled: next });
+      });
+
+      async function copyText(text) {
+        try {
+          await navigator.clipboard.writeText(text);
+          showToast(`已复制 ${text}`);
+          log('copied_to_clipboard', { kind: text.includes('://') ? 'url' : 'code' });
+        } catch (error) {
+          showToast('复制功能需要浏览器权限');
+          console.warn('[android-design] clipboard_failed', error);
+        }
+      }
+
+      document.querySelectorAll('[data-code], [data-copy]').forEach((button) => {
+        button.addEventListener('click', () => copyText(button.dataset.code || button.dataset.copy));
+      });
+
+      document.querySelector('#secret-toggle').addEventListener('click', () => {
+        const secret = document.querySelector('#secret');
+        const visible = secret.type === 'text';
+        secret.type = visible ? 'password' : 'text';
+        showToast(visible ? '云端密钥已隐藏' : '云端密钥已显示');
+        log('relay_secret_visibility_changed', { visible: !visible });
+      });
+
+      [['#restart-button', '接收服务已重启'], ['#test-button', '云端连接正常'], ['#save-button', '云端配置已保存'], ['#device-edit', '设备编辑功能待接入']].forEach(([selector, message]) => {
+        document.querySelector(selector).addEventListener('click', () => {
+          showToast(message);
+          log('settings_action', { action: selector });
+        });
+      });
+    </script>
+  </body>
+</html>
